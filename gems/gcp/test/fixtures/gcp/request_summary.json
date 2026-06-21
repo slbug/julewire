@@ -1,0 +1,38 @@
+{
+  "severity": "INFO",
+  "message": "GET /hello -> 200 in 123.4ms",
+  "time": "2026-05-28T12:00:00.000000000Z",
+  "httpRequest": {
+    "requestMethod": "GET",
+    "requestUrl": "http://example.com/hello",
+    "status": 200,
+    "userAgent": "curl",
+    "remoteIp": "127.0.0.1",
+    "responseSize": "456",
+    "latency": "0.1234s"
+  },
+  "logging.googleapis.com/operation": {
+    "id": "request-1",
+    "producer": "rails",
+    "last": true
+  },
+  "julewire": {
+    "kind": "summary",
+    "event": "request.completed",
+    "source": "rails",
+    "execution": {
+      "type": "request"
+    },
+    "context": {
+      "request_id": "request-1"
+    },
+    "metrics": {
+      "duration_ms": 123.4
+    }
+  },
+  "attributes": {
+    "rails": {
+      "filtered_path": "/hello"
+    }
+  }
+}

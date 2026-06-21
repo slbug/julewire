@@ -1,0 +1,51 @@
+plugins:
+  - rubocop-performance
+  - rubocop-minitest
+  - rubocop-rake
+
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  UseCache: false
+  Exclude:
+    - "**/tmp/**/*"
+    - "gems/rails/gemfiles/*.gemfile"
+
+Style/Documentation:
+  Enabled: false
+
+Style/ReturnNil:
+  Enabled: true
+  EnforcedStyle: return
+
+Style/ClassMethodsDefinitions:
+  Enabled: true
+  EnforcedStyle: self_class
+
+Style/ItBlockParameter:
+  Enabled: true
+  EnforcedStyle: allow_single_line
+
+Metrics/AbcSize:
+  Max: 30
+
+Metrics/ClassLength:
+  Max: 220
+
+Metrics/ModuleLength:
+  Max: 130
+
+Metrics/CyclomaticComplexity:
+  Max: 12
+
+Metrics/MethodLength:
+  Max: 25
+
+Metrics/ParameterLists:
+  Max: 8
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes

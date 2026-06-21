@@ -1,0 +1,11 @@
+inherit_from: ../../.rubocop.yml
+
+AllCops:
+  SuggestExtensions: false
+  Exclude:
+    - gemfiles/*.gemfile
+    - tmp/**/*
+
+Naming/FileName:
+  Exclude:
+    - lib/julewire-rails.rb

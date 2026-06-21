@@ -1,0 +1,86 @@
+# frozen_string_literal: true
+
+require "bundler/gem_tasks"
+require "rbconfig"
+require "minitest/test_task"
+
+Minitest::TestTask.create do |test|
+  test.framework = %(require "test_helper")
+end
+
+require "rubocop/rake_task"
+
+RuboCop::RakeTask.new
+
+def ruby_exec(gem_name, executable, arguments)
+  command = [RbConfig.ruby, Gem.bin_path(gem_name, executable)] + arguments
+  sh(*command)
+end
+
+RAILS_APPRAISAL_TARGETS = %w[rails_8_1 rails_head].freeze
+
+def appraisal_gemfile(target)
+  File.expand_path("gemfiles/#{target}.gemfile", __dir__)
+end
+
+def appraisal_test_env(target)
+  {
+    "JULEWIRE_RAILS_APPRAISAL" => target,
+    "BUNDLE_GEMFILE" => appraisal_gemfile(target)
+  }
+end
+
+def bundle_command(*arguments)
+  [RbConfig.ruby, Gem.bin_path("bundler", "bundle"), *arguments]
+end
+
+def sh_with_appraisal_bundle(env, *command)
+  Bundler.with_unbundled_env { sh(env, *command) }
+end
+
+def ensure_appraisal_bundle!(target)
+  env = appraisal_test_env(target)
+  setup_command = [RbConfig.ruby, "-rbundler/setup", "-e", "exit"]
+  return if Bundler.with_unbundled_env { system(env, *setup_command) }
+
+  Bundler.with_unbundled_env { sh(env, *bundle_command("install")) }
+end
+
+desc "Run tests with coverage enabled"
+task :coverage do
+  sh({ "COVERAGE" => "true" }, RbConfig.ruby, "-rbundler/setup", Gem.bin_path("rake", "rake"), "test")
+end
+
+desc "Run Flay duplicate code analysis"
+task :flay do
+  test_files = Dir["test/**/*.rb"].reject { it.start_with?("test/tmp/") }
+  ruby_exec("flay", "flay", ["lib", *test_files])
+end
+
+desc "Run Debride unused code analysis"
+task :debride do
+  ruby_exec("debride", "debride", %w[lib])
+end
+
+desc "Run Bundler audit"
+task :audit do
+  ruby_exec("bundler-audit", "bundle-audit", %w[check --update])
+end
+
+namespace :appraisal do
+  desc "Run Rails suites for all configured appraisal targets"
+  task :test do
+    RAILS_APPRAISAL_TARGETS.each do |target|
+      ensure_appraisal_bundle!(target)
+      sh_with_appraisal_bundle(
+        appraisal_test_env(target),
+        RbConfig.ruby,
+        "-rbundler/setup",
+        Gem.bin_path("rake", "rake"),
+        "test"
+      )
+    end
+  end
+end
+
+task default: %i[test rubocop flay debride audit]

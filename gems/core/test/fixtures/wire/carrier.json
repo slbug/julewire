@@ -1,0 +1,3 @@
+{
+  "julewire": "{\"context\":{\"request_id\":\"req-1\"},\"carry\":{\"http\":{\"request_headers\":{\"traceparent\":\"00-06796866738c859f2f19b7cfb3214824-000000000000004a-01\"}}},\"execution\":{\"type\":\"request\",\"id\":\"request-1\",\"depth\":1,\"root\":{\"type\":\"request\",\"id\":\"request-1\"}}}"
+}

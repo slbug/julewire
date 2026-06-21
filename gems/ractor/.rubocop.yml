@@ -1,0 +1,11 @@
+inherit_from: ../../.rubocop.yml
+
+AllCops:
+  TargetRubyVersion: 4.0
+
+Metrics/ClassLength:
+  Max: 150
+
+Naming/FileName:
+  Exclude:
+    - lib/julewire-ractor.rb

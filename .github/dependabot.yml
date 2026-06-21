@@ -1,0 +1,57 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: bundler
+    directory: /gems/core
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/active_job
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/gcp
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/karafka
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/rack
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/ractor
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/rails
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/rails_support
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/redaction
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: bundler
+    directory: /gems/semantic_logger
+    schedule:
+      interval: weekly

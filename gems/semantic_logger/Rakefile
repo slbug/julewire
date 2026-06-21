@@ -1,0 +1,40 @@
+# frozen_string_literal: true
+
+require "bundler/gem_tasks"
+require "rbconfig"
+require "minitest/test_task"
+
+Minitest::TestTask.create do |test|
+  test.framework = %(require "test_helper")
+end
+
+require "rubocop/rake_task"
+
+RuboCop::RakeTask.new
+
+def ruby_exec(gem_name, executable, arguments)
+  command = [RbConfig.ruby, Gem.bin_path(gem_name, executable)] + arguments
+  sh(*command)
+end
+
+desc "Run tests with coverage enabled"
+task :coverage do
+  sh({ "COVERAGE" => "true" }, RbConfig.ruby, "-rbundler/setup", Gem.bin_path("rake", "rake"), "test")
+end
+
+desc "Run Flay duplicate code analysis"
+task :flay do
+  ruby_exec("flay", "flay", %w[lib test])
+end
+
+desc "Run Debride unused code analysis"
+task :debride do
+  ruby_exec("debride", "debride", %w[lib])
+end
+
+desc "Run Bundler audit"
+task :audit do
+  ruby_exec("bundler-audit", "bundle-audit", %w[check --update])
+end
+
+task default: %i[test rubocop flay debride audit]

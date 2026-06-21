@@ -1,0 +1,76 @@
+{
+  "closed": false,
+  "counts": {
+    "close_attempts": 0,
+    "configure_attempts": 1,
+    "flush_attempts": 0,
+    "lifecycle_warnings": 0,
+    "post_close_emits_total": 0,
+    "reset_attempts": 0,
+    "runtime_callback_failures": 0,
+    "runtime_failures": 0,
+    "failures": 0,
+    "invalid_record_severities": 0,
+    "post_close_emits": 0
+  },
+  "generation": 1,
+  "integrations": {},
+  "process_integrations": {},
+  "last_callback_failure": null,
+  "last_failure": null,
+  "pipeline": {
+    "configured": true,
+    "counts": {
+      "callback_error": 0,
+      "entered": 1,
+      "level_dropped": 0,
+      "no_output_dropped": 0,
+      "processor_dropped": 0,
+      "processor_error": 0,
+      "failures": 0
+    },
+    "destinations": {
+      "default": {
+        "counts": {
+          "callback_error": 0,
+          "encode_error": 0,
+          "formatter_error": 0,
+          "formatted": 1,
+          "output_accepted": 0,
+          "output_error": 1,
+          "output_exception": 1,
+          "output_rejected": 0,
+          "processor_dropped": 0,
+          "processor_error": 0,
+          "received": 1,
+          "record_too_large": 0,
+          "failures": 1
+        },
+        "last_callback_failure": null,
+        "last_failure": {
+          "at": "<timestamp>",
+          "action": "write",
+          "class": "RuntimeError",
+          "output_class": "Julewire::HealthFixtureFailingOutput",
+          "phase": "output",
+          "record": {
+            "event": "log",
+            "labels": {},
+            "severity": "info"
+          }
+        },
+        "last_loss": {
+          "at": "<timestamp>",
+          "event": "log",
+          "reason": "output_exception",
+          "severity": "info"
+        },
+        "status": "degraded"
+      }
+    },
+    "last_callback_failure": null,
+    "last_failure": null,
+    "status": "ok"
+  },
+  "status": "degraded"
+}

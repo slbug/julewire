@@ -1,0 +1,529 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      active_job: ${{ steps.filter.outputs.active_job }}
+      core: ${{ steps.filter.outputs.core }}
+      gcp: ${{ steps.filter.outputs.gcp }}
+      karafka: ${{ steps.filter.outputs.karafka }}
+      rack: ${{ steps.filter.outputs.rack }}
+      ractor: ${{ steps.filter.outputs.ractor }}
+      rails: ${{ steps.filter.outputs.rails }}
+      rails_support: ${{ steps.filter.outputs.rails_support }}
+      release_metadata: ${{ steps.filter.outputs.release_metadata }}
+      redaction: ${{ steps.filter.outputs.redaction }}
+      semantic_logger: ${{ steps.filter.outputs.semantic_logger }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            shared:
+              - '.github/dependabot.yml'
+              - '.github/workflows/**'
+              - '.gitignore'
+              - '.rubocop.yml'
+              - 'Rakefile'
+            release_metadata:
+              - 'Rakefile'
+              - 'gems/*/*.gemspec'
+              - 'gems/*/CHANGELOG.md'
+              - 'gems/*/lib/julewire/**/version.rb'
+            core:
+              - 'gems/core/**'
+            active_job:
+              - 'gems/active_job/**'
+            gcp:
+              - 'gems/gcp/**'
+            karafka:
+              - 'gems/karafka/**'
+            rack:
+              - 'gems/rack/**'
+            ractor:
+              - 'gems/ractor/**'
+            rails:
+              - 'gems/rails/**'
+            rails_support:
+              - 'gems/rails_support/**'
+            redaction:
+              - 'gems/redaction/**'
+            semantic_logger:
+              - 'gems/semantic_logger/**'
+
+  release-check:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.release_metadata == 'true' }}
+    runs-on: ubuntu-latest
+    name: release metadata
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+
+      - name: Check release metadata
+        run: ruby -S rake release:check
+
+  core:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' }}
+    runs-on: ubuntu-latest
+    name: core / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/core
+
+      - name: Run the default task
+        working-directory: gems/core
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/core/coverage/lcov/lcov.info
+          flags: core,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  active_job:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.active_job == 'true' || needs.changes.outputs.rails_support == 'true' }}
+    runs-on: ubuntu-latest
+    name: active_job / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/active_job
+
+      - name: Run the default task
+        working-directory: gems/active_job
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/active_job/coverage/lcov/lcov.info
+          flags: active_job,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  gcp:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.gcp == 'true' }}
+    runs-on: ubuntu-latest
+    name: gcp / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/gcp
+
+      - name: Run the default task
+        working-directory: gems/gcp
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/gcp/coverage/lcov/lcov.info
+          flags: gcp,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  karafka:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.karafka == 'true' }}
+    runs-on: ubuntu-latest
+    name: karafka / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/karafka
+
+      - name: Run the default task
+        working-directory: gems/karafka
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/karafka/coverage/lcov/lcov.info
+          flags: karafka,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  rails:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.rack == 'true' || needs.changes.outputs.rails == 'true' || needs.changes.outputs.rails_support == 'true' }}
+    runs-on: ubuntu-latest
+    name: rails / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/rails
+
+      - name: Run the default task
+        working-directory: gems/rails
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/rails/coverage/lcov/lcov.info
+          flags: rails,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  rack:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.rack == 'true' }}
+    runs-on: ubuntu-latest
+    name: rack / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/rack
+
+      - name: Run the default task
+        working-directory: gems/rack
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/rack/coverage/lcov/lcov.info
+          flags: rack,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  rails-appraisal:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.rack == 'true' || needs.changes.outputs.rails == 'true' || needs.changes.outputs.rails_support == 'true' }}
+    runs-on: ubuntu-latest
+    name: rails appraisal / Ruby 4.0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+          working-directory: gems/rails
+
+      - name: Run Rails 8.1 and Rails head suites
+        working-directory: gems/rails
+        run: bundle exec rake appraisal:test
+
+  rails_support:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.rails_support == 'true' }}
+    runs-on: ubuntu-latest
+    name: rails_support / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/rails_support
+
+      - name: Run the default task
+        working-directory: gems/rails_support
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/rails_support/coverage/lcov/lcov.info
+          flags: rails_support,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  redaction:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.redaction == 'true' }}
+    runs-on: ubuntu-latest
+    name: redaction / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/redaction
+
+      - name: Run the default task
+        working-directory: gems/redaction
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/redaction/coverage/lcov/lcov.info
+          flags: redaction,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  semantic_logger:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.semantic_logger == 'true' }}
+    runs-on: ubuntu-latest
+    name: semantic_logger / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/semantic_logger
+
+      - name: Run the default task
+        working-directory: gems/semantic_logger
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/semantic_logger/coverage/lcov/lcov.info
+          flags: semantic_logger,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+  ractor:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ractor == 'true' }}
+    runs-on: ubuntu-latest
+    name: ractor / Ruby 4.0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+          working-directory: gems/ractor
+
+      - name: Run the default task
+        working-directory: gems/ractor
+        run: COVERAGE=true bundle exec rake
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: ./gems/ractor/coverage/lcov/lcov.info
+          flags: ractor,ruby-4.0
+          fail_ci_if_error: true
+
+  mutant:
+    needs: changes
+    if: >-
+      ${{
+        needs.changes.outputs.shared == 'true' ||
+        needs.changes.outputs.core == 'true' ||
+        needs.changes.outputs.active_job == 'true' ||
+        needs.changes.outputs.gcp == 'true' ||
+        needs.changes.outputs.karafka == 'true' ||
+        needs.changes.outputs.rack == 'true' ||
+        needs.changes.outputs.ractor == 'true' ||
+        needs.changes.outputs.rails == 'true' ||
+        needs.changes.outputs.rails_support == 'true' ||
+        needs.changes.outputs.redaction == 'true' ||
+        needs.changes.outputs.semantic_logger == 'true'
+      }}
+    runs-on: ubuntu-latest
+    name: mutant / Ruby 4.0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+
+      - name: Run primary mutation subjects
+        run: |
+          set -euo pipefail
+
+          run_mutant() {
+            local dir="$1"
+            local task="$2"
+
+            (cd "$dir" && bundle install)
+            ruby -S rake "mutant:${task}"
+          }
+
+          if [[ "${{ needs.changes.outputs.shared }}" == "true" || "${{ needs.changes.outputs.core }}" == "true" ]]; then
+            run_mutant gems/active_job active_job
+            run_mutant gems/core core
+            run_mutant gems/gcp gcp
+            run_mutant gems/karafka karafka
+            run_mutant gems/rack rack
+            run_mutant gems/ractor ractor
+            run_mutant gems/rails rails
+            run_mutant gems/rails_support rails_support
+            run_mutant gems/redaction redaction
+            run_mutant gems/semantic_logger semantic_logger
+            exit 0
+          fi
+
+          if [[ "${{ needs.changes.outputs.active_job }}" == "true" || "${{ needs.changes.outputs.rails_support }}" == "true" ]]; then
+            run_mutant gems/active_job active_job
+          fi
+
+          if [[ "${{ needs.changes.outputs.gcp }}" == "true" ]]; then
+            run_mutant gems/gcp gcp
+          fi
+
+          if [[ "${{ needs.changes.outputs.karafka }}" == "true" ]]; then
+            run_mutant gems/karafka karafka
+          fi
+
+          if [[ "${{ needs.changes.outputs.rack }}" == "true" ]]; then
+            run_mutant gems/rack rack
+          fi
+
+          if [[ "${{ needs.changes.outputs.ractor }}" == "true" ]]; then
+            run_mutant gems/ractor ractor
+          fi
+
+          if [[ "${{ needs.changes.outputs.rails }}" == "true" || "${{ needs.changes.outputs.rack }}" == "true" || "${{ needs.changes.outputs.rails_support }}" == "true" ]]; then
+            run_mutant gems/rails rails
+          fi
+
+          if [[ "${{ needs.changes.outputs.rails_support }}" == "true" ]]; then
+            run_mutant gems/rails_support rails_support
+          fi
+
+          if [[ "${{ needs.changes.outputs.redaction }}" == "true" ]]; then
+            run_mutant gems/redaction redaction
+          fi
+
+          if [[ "${{ needs.changes.outputs.semantic_logger }}" == "true" ]]; then
+            run_mutant gems/semantic_logger semantic_logger
+          fi

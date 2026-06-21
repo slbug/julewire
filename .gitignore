@@ -1,0 +1,34 @@
+# Bundler and gem outputs
+/benchmarks/
+/test_julewire_app/
+/scratchpad/
+/Rakefile.local
+**/.bundle/
+**/.yardoc
+**/_yardoc/
+**/coverage/
+.rubocop_cache/
+.mutant/
+**/doc/
+**/log/
+**/pkg/
+**/spec/reports/
+
+# Local runtime files
+**/.env*
+**/CLAUDE.md
+**/.claude/
+**/.DS_Store
+
+# Temporary files
+**/tmp/*
+!**/tmp/.keep
+!**/tmp/pids/
+**/tmp/pids/*
+!**/tmp/pids/.keep
+!**/tmp/storage/
+**/tmp/storage/*
+!**/tmp/storage/.keep
+
+# Appraisal-generated locks
+gems/rails/gemfiles/*.gemfile.lock

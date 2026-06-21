@@ -1,0 +1,8 @@
+inherit_from: ../../.rubocop.yml
+
+Metrics/ClassLength:
+  Max: 150
+
+Naming/FileName:
+  Exclude:
+    - lib/julewire-semantic_logger.rb

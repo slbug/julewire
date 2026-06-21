@@ -1,0 +1,38 @@
+{
+  "closed": false,
+  "counts": {
+    "close_attempts": 0,
+    "configure_attempts": 0,
+    "flush_attempts": 0,
+    "lifecycle_warnings": 0,
+    "post_close_emits_total": 0,
+    "reset_attempts": 0,
+    "runtime_callback_failures": 0,
+    "runtime_failures": 0,
+    "failures": 0,
+    "invalid_record_severities": 0,
+    "post_close_emits": 0
+  },
+  "generation": 0,
+  "integrations": {},
+  "process_integrations": {},
+  "last_callback_failure": null,
+  "last_failure": null,
+  "pipeline": {
+    "configured": false,
+    "counts": {
+      "callback_error": 0,
+      "entered": 0,
+      "level_dropped": 0,
+      "no_output_dropped": 0,
+      "processor_dropped": 0,
+      "processor_error": 0,
+      "failures": 0
+    },
+    "destinations": {},
+    "last_callback_failure": null,
+    "last_failure": null,
+    "status": "unconfigured"
+  },
+  "status": "degraded"
+}
