@@ -9,6 +9,7 @@ AllCops:
   UseCache: false
   Exclude:
     - "**/tmp/**/*"
+    - "**/vendor/**/*"
     - "gems/rails/gemfiles/*.gemfile"
 
 Style/Documentation:

@@ -10,7 +10,9 @@ end
 
 require "rubocop/rake_task"
 
-RuboCop::RakeTask.new
+RuboCop::RakeTask.new do |task|
+  task.patterns = %w[*.gemspec Gemfile Rakefile exe/* lib/**/*.rb test/**/*.rb]
+end
 
 def ruby_exec(gem_name, executable, arguments)
   command = [RbConfig.ruby, Gem.bin_path(gem_name, executable)] + arguments
