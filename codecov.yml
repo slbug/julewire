@@ -1,0 +1,53 @@
+coverage:
+  status:
+    project:
+      default: false
+    patch:
+      default:
+        target: auto
+        threshold: 0%
+
+comment:
+  layout: "diff, flags, files"
+  behavior: default
+  require_changes: false
+  show_carryforward_flags: true
+
+flag_management:
+  default_rules:
+    carryforward: true
+    statuses:
+      - type: project
+        target: auto
+        threshold: 1%
+  individual_flags:
+    - name: core
+      paths:
+        - gems/core/lib
+    - name: active_job
+      paths:
+        - gems/active_job/lib
+    - name: gcp
+      paths:
+        - gems/gcp/lib
+    - name: karafka
+      paths:
+        - gems/karafka/lib
+    - name: rack
+      paths:
+        - gems/rack/lib
+    - name: rails
+      paths:
+        - gems/rails/lib
+    - name: rails_support
+      paths:
+        - gems/rails_support/lib
+    - name: redaction
+      paths:
+        - gems/redaction/lib
+    - name: semantic_logger
+      paths:
+        - gems/semantic_logger/lib
+    - name: ractor
+      paths:
+        - gems/ractor/lib

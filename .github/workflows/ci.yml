@@ -120,7 +120,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/core/coverage/lcov/lcov.info
-          flags: core,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: core
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -130,6 +131,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/core/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: core,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -168,7 +170,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/active_job/coverage/lcov/lcov.info
-          flags: active_job,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: active_job
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -178,6 +181,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/active_job/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: active_job,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -216,7 +220,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/gcp/coverage/lcov/lcov.info
-          flags: gcp,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: gcp
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -226,6 +231,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/gcp/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: gcp,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -264,7 +270,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/karafka/coverage/lcov/lcov.info
-          flags: karafka,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: karafka
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -274,6 +281,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/karafka/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: karafka,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -312,7 +320,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/rails/coverage/lcov/lcov.info
-          flags: rails,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: rails
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -322,6 +331,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/rails/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: rails,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -360,7 +370,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/rack/coverage/lcov/lcov.info
-          flags: rack,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: rack
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -370,6 +381,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/rack/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: rack,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -403,6 +415,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/rails/test/reports/rails_8_1/TEST-minitest.xml,./gems/rails/test/reports/rails_head/TEST-minitest.xml
+          disable_search: true
           flags: rails_appraisal,ruby-4.0
           fail_ci_if_error: true
 
@@ -441,7 +454,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/rails_support/coverage/lcov/lcov.info
-          flags: rails_support,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: rails_support
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -451,6 +465,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/rails_support/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: rails_support,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -489,7 +504,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/redaction/coverage/lcov/lcov.info
-          flags: redaction,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: redaction
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -499,6 +515,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/redaction/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: redaction,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -537,7 +554,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/semantic_logger/coverage/lcov/lcov.info
-          flags: semantic_logger,ruby-${{ matrix.ruby }}
+          disable_search: true
+          flags: semantic_logger
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -547,6 +565,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/semantic_logger/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: semantic_logger,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -579,7 +598,8 @@ jobs:
         with:
           use_oidc: true
           files: ./gems/ractor/coverage/lcov/lcov.info
-          flags: ractor,ruby-4.0
+          disable_search: true
+          flags: ractor
           fail_ci_if_error: true
 
       - name: Upload test results
@@ -589,6 +609,7 @@ jobs:
           use_oidc: true
           report_type: test_results
           files: ./gems/ractor/test/reports/TEST-minitest.xml
+          disable_search: true
           flags: ractor,ruby-4.0
           fail_ci_if_error: true
 

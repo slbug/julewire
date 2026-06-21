@@ -110,17 +110,9 @@ privacy layer; redaction is explicit processor policy.
 
 ## Repo
 
-This is a monorepo with independently-packaged gems under `gems/`.
-
-Common repo files live at the root:
-
-- [.github/workflows/ci.yml](.github/workflows/ci.yml)
-- [.github/dependabot.yml](.github/dependabot.yml)
-- [.rubocop.yml](.rubocop.yml)
-- [.gitignore](.gitignore)
-- [CONVENTIONS.md](CONVENTIONS.md)
-- [LICENSE.txt](LICENSE.txt)
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+This is a monorepo with independently-packaged gems under `gems/`. CI is
+path-filtered by gem; Codecov uses per-gem carryforward flags so partial runs do
+not pretend untouched gems went dark.
 
 ## Development
 
