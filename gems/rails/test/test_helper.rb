@@ -9,6 +9,8 @@ require_relative "support/julewire/rails/rescued_exception_helpers"
 require_relative "support/julewire/rails/test_helpers"
 
 require "minitest/autorun"
+require "julewire/core/testing/test_reports"
+Julewire::Core::Testing::TestReports.start!
 require "mutant/minitest/coverage"
 require "json"
 require "stringio"

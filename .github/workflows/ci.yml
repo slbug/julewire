@@ -109,13 +109,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/core
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/core/coverage/lcov/lcov.info
+          flags: core,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/core/test/reports/TEST-minitest.xml
           flags: core,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -143,13 +157,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/active_job
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/active_job/coverage/lcov/lcov.info
+          flags: active_job,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/active_job/test/reports/TEST-minitest.xml
           flags: active_job,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -177,13 +205,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/gcp
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/gcp/coverage/lcov/lcov.info
+          flags: gcp,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/gcp/test/reports/TEST-minitest.xml
           flags: gcp,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -211,13 +253,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/karafka
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/karafka/coverage/lcov/lcov.info
+          flags: karafka,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/karafka/test/reports/TEST-minitest.xml
           flags: karafka,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -245,13 +301,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/rails
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/rails/coverage/lcov/lcov.info
+          flags: rails,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/rails/test/reports/TEST-minitest.xml
           flags: rails,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -279,13 +349,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/rack
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/rack/coverage/lcov/lcov.info
+          flags: rack,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/rack/test/reports/TEST-minitest.xml
           flags: rack,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -307,7 +391,20 @@ jobs:
 
       - name: Run Rails 8.1 and Rails head suites
         working-directory: gems/rails
+        env:
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
         run: bundle exec rake appraisal:test
+
+      - name: Upload appraisal test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/rails/test/reports/rails_8_1/TEST-minitest.xml,./gems/rails/test/reports/rails_head/TEST-minitest.xml
+          flags: rails_appraisal,ruby-4.0
+          fail_ci_if_error: true
 
   rails_support:
     needs: changes
@@ -333,13 +430,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/rails_support
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/rails_support/coverage/lcov/lcov.info
+          flags: rails_support,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/rails_support/test/reports/TEST-minitest.xml
           flags: rails_support,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -367,13 +478,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/redaction
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/redaction/coverage/lcov/lcov.info
+          flags: redaction,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/redaction/test/reports/TEST-minitest.xml
           flags: redaction,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -401,13 +526,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/semantic_logger
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/semantic_logger/coverage/lcov/lcov.info
+          flags: semantic_logger,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/semantic_logger/test/reports/TEST-minitest.xml
           flags: semantic_logger,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
@@ -429,13 +568,27 @@ jobs:
 
       - name: Run the default task
         working-directory: gems/ractor
-        run: COVERAGE=true bundle exec rake
+        env:
+          COVERAGE: "true"
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake
 
       - name: Upload coverage
         uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/ractor/coverage/lcov/lcov.info
+          flags: ractor,ruby-4.0
+          fail_ci_if_error: true
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/ractor/test/reports/TEST-minitest.xml
           flags: ractor,ruby-4.0
           fail_ci_if_error: true
 

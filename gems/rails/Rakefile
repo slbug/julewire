@@ -26,10 +26,15 @@ def appraisal_gemfile(target)
 end
 
 def appraisal_test_env(target)
-  {
+  env = {
     "JULEWIRE_RAILS_APPRAISAL" => target,
     "BUNDLE_GEMFILE" => appraisal_gemfile(target)
   }
+  if ENV["JULEWIRE_JUNIT"]
+    env["JULEWIRE_JUNIT"] = ENV.fetch("JULEWIRE_JUNIT")
+    env["JULEWIRE_JUNIT_DIR"] = File.join(ENV.fetch("JULEWIRE_JUNIT_DIR", "test/reports"), target)
+  end
+  env
 end
 
 def bundle_command(*arguments)

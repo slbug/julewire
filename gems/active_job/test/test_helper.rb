@@ -6,6 +6,8 @@ Julewire::Core::Testing::Coverage.start!
 require "julewire/active_job"
 require "julewire/core/testing"
 require "minitest/autorun"
+require "julewire/core/testing/test_reports"
+Julewire::Core::Testing::TestReports.start!
 require "mutant/minitest/coverage"
 
 module JulewireCapture

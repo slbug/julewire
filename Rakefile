@@ -104,6 +104,7 @@ CORE_ALLOWED_TOP_LEVEL_CONSTANTS = %w[
   Data
   Date
   DateTime
+  Dir
   ENV
   Encoding
   EncodingError
@@ -112,6 +113,7 @@ CORE_ALLOWED_TOP_LEVEL_CONSTANTS = %w[
   Exception
   Fiber
   File
+  FileUtils
   Float
   Hash
   IO
@@ -134,7 +136,6 @@ CORE_ALLOWED_TOP_LEVEL_CONSTANTS = %w[
   Regexp
   RuntimeError
   SecureRandom
-  SimpleCov
   StandardError
   String
   Symbol
@@ -147,6 +148,10 @@ CORE_ALLOWED_TOP_LEVEL_CONSTANTS = %w[
   Warning
   Zeitwerk
 ].freeze
+CORE_ALLOWED_TOP_LEVEL_CONSTANTS_BY_PATH = {
+  "gems/core/lib/julewire/core/testing/coverage.rb" => %w[SimpleCov],
+  "gems/core/lib/julewire/core/testing/test_reports.rb" => %w[Minitest]
+}.freeze
 CORE_PUBLIC_ALIAS_PREFIXES = %w[
   Julewire::ConsoleFormatter
   Julewire::Error
@@ -440,7 +445,7 @@ end
 def assert_core_framework_neutrality
   offenders = Dir.glob("gems/core/lib/**/*.rb").flat_map do |path|
     ruby_constant_references(path).filter_map do |reference, line|
-      "#{path}:#{line}:#{reference}" if forbidden_core_constant_reference?(reference)
+      "#{path}:#{line}:#{reference}" if forbidden_core_constant_reference?(path, reference)
     end
   end
   return if offenders.empty?
@@ -604,13 +609,14 @@ def covered_by_longer_constant_reference?(reference, names)
   names.any? { it != reference && it.start_with?("#{reference}::") }
 end
 
-def forbidden_core_constant_reference?(reference)
+def forbidden_core_constant_reference?(path, reference)
   constant = reference.delete_prefix("::")
   return false if constant == "Julewire" || constant.start_with?("Julewire::Core")
   return false if constant == "Core" || constant.start_with?("Core::")
 
   root = constant.split("::", 2).first
   return false if CORE_ALLOWED_TOP_LEVEL_CONSTANTS.include?(root)
+  return false if CORE_ALLOWED_TOP_LEVEL_CONSTANTS_BY_PATH.fetch(path, []).include?(root)
   return false if core_local_constant_roots.include?(root)
 
   true

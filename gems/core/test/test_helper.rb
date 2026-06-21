@@ -11,6 +11,8 @@ require_relative "support/julewire/core/test_helpers"
 require_relative "support/julewire/core/test_payload_processor"
 
 require "minitest/autorun"
+require "julewire/core/testing/test_reports"
+Julewire::Core::Testing::TestReports.start!
 require "mutant/minitest/coverage"
 
 module Minitest
