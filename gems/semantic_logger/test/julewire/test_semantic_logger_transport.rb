@@ -298,7 +298,7 @@ module Julewire
 
         assert_empty output.string
         assert_equal :degraded, health.fetch(:status)
-        assert_equal({ received: 1, formatted: 0, written: 0, failed: 1 }, health.fetch(:counts))
+        assert_equal({ received: 1, formatted: 0, written: 0, failed: 1, callback_error: 0 }, health.fetch(:counts))
       end
 
       def test_custom_destination_degraded_status_recovers_after_successful_write
@@ -312,7 +312,7 @@ module Julewire
         health = destination.health
 
         assert_equal :ok, health.fetch(:status)
-        assert_equal({ received: 2, formatted: 2, written: 1, failed: 1 }, health.fetch(:counts))
+        assert_equal({ received: 2, formatted: 2, written: 1, failed: 1, callback_error: 0 }, health.fetch(:counts))
         assert_equal 1, health.dig(:transport, :counts, :failures)
       ensure
         destination&.close
@@ -349,7 +349,9 @@ module Julewire
         assert destination.flush
         assert_equal :ok, destination.health.fetch(:status)
         assert_equal 2, transport.flushes
-        assert_equal({ received: 0, formatted: 0, written: 0, failed: 1 }, destination.health.fetch(:counts))
+        expected_counts = { received: 0, formatted: 0, written: 0, failed: 1, callback_error: 0 }
+
+        assert_equal expected_counts, destination.health.fetch(:counts)
       end
 
       def test_custom_destination_contains_formatter_signature_errors
@@ -366,7 +368,7 @@ module Julewire
         assert_empty output.string
         assert_equal :degraded, Julewire.health.dig(:pipeline, :destinations, :semantic, :status)
         assert_equal(
-          { received: 1, formatted: 0, written: 0, failed: 1 },
+          { received: 1, formatted: 0, written: 0, failed: 1, callback_error: 0 },
           Julewire.health.dig(:pipeline, :destinations, :semantic, :counts)
         )
       end
@@ -879,7 +881,7 @@ module Julewire
         health = destination.health
 
         assert_equal :degraded, health.fetch(:status)
-        assert_equal({ received: 1, formatted: 1, written: 0, failed: 1 }, health.fetch(:counts))
+        assert_equal({ received: 1, formatted: 1, written: 0, failed: 1, callback_error: 0 }, health.fetch(:counts))
         assert_equal 1, health.dig(:transport, :counts, :failures)
       ensure
         destination&.close
@@ -896,7 +898,10 @@ module Julewire
         destination.emit(record(message: "bad", severity: :info))
 
         assert_equal :ok, destination.health.fetch(:status)
-        assert_equal({ received: 1, formatted: 1, written: 1, failed: 0 }, destination.health.fetch(:counts))
+        assert_equal(
+          { received: 1, formatted: 1, written: 1, failed: 0, callback_error: 0 },
+          destination.health.fetch(:counts)
+        )
       ensure
         destination&.close
       end

@@ -39,6 +39,26 @@ module Minitest
       assert_match message, error.message
     end
 
+    def assert_string_truncation_metadata(metadata, fields:, **limits)
+      assert_truncation_metadata_keys(metadata, fields: fields, key_style: :string, **limits)
+    end
+
+    def assert_symbol_truncation_metadata(metadata, fields:, **limits)
+      assert_truncation_metadata_keys(metadata, fields: fields, key_style: :symbol, **limits)
+    end
+
+    def assert_truncation_metadata_keys(metadata, fields:, key_style:, **limits)
+      key_for = ->(value) { key_style == :string ? value.to_s : value }
+
+      assert metadata.fetch(key_for.call(:truncated))
+      assert_equal fields, metadata.fetch(key_for.call(:truncated_fields))
+      limit_values = metadata.fetch(key_for.call(:limits))
+
+      limits.each do |key, value|
+        assert_equal value, limit_values.fetch(key_for.call(key))
+      end
+    end
+
     def capture_propagation(type:, execution: {}, context: {}, carry: {}, summary: {})
       envelope = nil
 

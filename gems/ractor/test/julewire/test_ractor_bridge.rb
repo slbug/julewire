@@ -112,13 +112,14 @@ module Julewire
   end
 
   class SlowRactorPortOutput
-    def initialize(write_port)
+    def initialize(write_port, sleep_seconds: 0.5)
       @write_port = write_port
+      @sleep_seconds = sleep_seconds
     end
 
     def write(value) # rubocop:disable Naming/PredicateMethod -- Output protocol uses truthy write results.
       @write_port.send(value)
-      sleep 0.5
+      sleep @sleep_seconds
       true
     end
   end
@@ -682,6 +683,78 @@ module Julewire
     end
   end
 
+  class TestRactorDestinationConcurrentQueue < Minitest::Test
+    def test_ractor_destination_reserves_queue_slots_across_concurrent_emitters
+      accepted, dropped = exercise_concurrent_queue
+
+      assert_includes %w[concurrent-0 concurrent-1], accepted
+      assert_equal [:queue_full_dropped], dropped
+      assert_equal 2, Array(accepted).size + dropped.size
+    end
+
+    def test_ractor_destination_queue_reservation_stress
+      8.times do
+        accepted, dropped = exercise_concurrent_queue(sleep_seconds: 0.02)
+
+        assert_includes %w[concurrent-0 concurrent-1], accepted
+        assert_equal [:queue_full_dropped], dropped
+        assert_equal 2, Array(accepted).size + dropped.size
+      end
+    end
+
+    private
+
+    def concurrent_queue_destination(sleep_seconds:)
+      write_port = ::Ractor::Port.new
+      drops = Queue.new
+      destination = Julewire::Ractor::Destination.new(
+        output: SlowRactorPortOutput.new(write_port, sleep_seconds: sleep_seconds),
+        max_queue: 1,
+        request_timeout: 0.01,
+        on_drop: ->(reason, _metadata) { drops << reason }
+      )
+      [write_port, drops, destination]
+    end
+
+    def start_concurrent_emitters(destination)
+      ready = Queue.new
+      start = Queue.new
+      threads = Array.new(2) do |index|
+        Thread.new do
+          ready << true
+          start.pop
+          destination.emit(record(message: "concurrent-#{index}"))
+        end
+      end
+      2.times { ready.pop }
+      2.times { start << true }
+      threads.each(&:join)
+      threads
+    end
+
+    def exercise_concurrent_queue(sleep_seconds: 0.5)
+      write_port, drops, destination = concurrent_queue_destination(sleep_seconds: sleep_seconds)
+      threads = start_concurrent_emitters(destination)
+      accepted = JSON.parse(write_port.receive).fetch("message")
+
+      assert_equal 1, destination.health.dig(:counts, :queue_full_dropped)
+
+      [accepted, nonblocking_queue_values(drops)]
+    ensure
+      threads&.each { |thread| thread.join(1) || thread.kill }
+      destination&.close(timeout: 1)
+      Julewire::Ractor::PortLifecycle.close(write_port) if write_port
+    end
+
+    def record(message:)
+      Julewire::Core::Records::Draft.build(
+        { message: message },
+        context: {},
+        scope: nil
+      ).to_record
+    end
+  end
+
   class TestRactorDestinationFanout < Minitest::Test
     class DestinationProbe
       attr_reader :emitted, :forks, :health_calls, :name
@@ -844,6 +917,7 @@ module Julewire
       health = destination.health
 
       assert_equal 1, health.dig(:counts, :send_error)
+      assert_equal 0, health.fetch(:in_flight)
       assert_equal :send_error, health.dig(:last_loss, :reason)
       assert_equal :degraded, health.fetch(:status)
       assert_equal [:send_error], nonblocking_queue_values(drops)

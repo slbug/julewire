@@ -14,7 +14,7 @@
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `carrier_max_bytes` | `nil` | Omit oversized carriers from Kafka headers. |
+| `carrier_max_bytes` | `65_536` | Omit oversized carriers from Kafka headers. |
 | `carrier_filter` | `nil` | Optional inbound header filter before restoring a message carrier. |
 | `consumer_event_names` | `:important` | Consumer monitor event profile or explicit event list. |
 | `producer_event_names` | `:important` | Producer monitor event profile or explicit event list. |

@@ -60,6 +60,28 @@ module Julewire
       )
     end
 
+    def test_with_message_ignores_oversized_inbound_carrier
+      records = capture_records
+      carrier = carrier_from_context("request-1")
+      configuration = Julewire::Karafka::Configuration.new
+      configuration.carrier_max_bytes = carrier.fetch(configuration.carrier_key).bytesize - 1
+
+      Julewire::Karafka.with_message(karafka_message(headers: carrier, offsets: [42]),
+                                     configuration: configuration) do
+        Julewire.emit(event: "kafka.point", source: "test")
+      end
+
+      point = records.find { it[:event] == "kafka.point" }
+
+      refute point.fetch(:context).key?(:request_id)
+      assert_equal "events", point.dig(:attributes, :karafka, :topic)
+      failure = Julewire.health.dig(:process_integrations, :karafka, :last_failure)
+
+      assert_equal :carrier_restore, failure.fetch(:action)
+      assert_equal :message_context, failure.fetch(:component)
+      assert_equal :oversized, failure.fetch(:status)
+    end
+
     def test_with_message_ignores_non_hash_filtered_carrier
       point, = emit_with_carrier_filter(->(*) { "not-a-carrier" })
 

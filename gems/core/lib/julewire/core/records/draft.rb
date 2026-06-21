@@ -90,10 +90,11 @@ module Julewire
           public
 
           def from_normalized_hash(data, lineage: nil, freeze_sections: true)
-            normalized = Fields::FieldSet.deep_symbolize_keys(data)
+            Record.validate_normalized_hash!(data)
+            normalized = data.dup
             lineage ||= Execution::Lineage.from_execution_hash(normalized[:execution])
-            normalized[:execution] = Execution::Lineage.clean_lazy_relationship_hash(normalized[:execution])
-            normalized = Fields::Internal.frozen_deep_symbolize_keys(normalized) if freeze_sections
+            normalized[:execution] = Execution::Lineage.clean_normalized_lazy_relationship_hash(normalized[:execution])
+            normalized = Fields::Internal.frozen_copy(normalized) if freeze_sections
             new(
               normalized,
               lineage: lineage,

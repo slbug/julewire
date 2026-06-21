@@ -33,6 +33,8 @@ module Julewire
         end
 
         def finish(reason: :closed, fields: {}, attributes: {}, error: nil, severity: nil)
+          # Finishing is one-shot: retrying after partial summary mutation can
+          # duplicate completion data, so failures are reported and stop here.
           return false unless mark_finished
 
           add_completion_attributes(reason)

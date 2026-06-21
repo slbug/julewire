@@ -106,8 +106,13 @@ module Julewire
     end
 
     def truncation_marker(fields, **limits)
+      metadata = Core::Serialization::Serializer.truncation_metadata(fields, **limits)
       {
-        TRUNCATION_KEY => Core::Serialization::Serializer.truncation_metadata(fields, **limits)
+        TRUNCATION_KEY => {
+          truncated: metadata.fetch("truncated"),
+          truncated_fields: metadata.fetch("truncated_fields"),
+          limits: metadata.fetch("limits").to_h { |key, value| [key.to_sym, value] }
+        }
       }
     end
   end

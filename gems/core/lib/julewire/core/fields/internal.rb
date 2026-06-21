@@ -56,7 +56,14 @@ module Julewire
             return EMPTY_HASH if value.is_a?(Hash) && value.empty?
             return EMPTY_ARRAY if value.is_a?(Array) && value.empty?
 
-            Serialization::ValueCopy.call(value, freeze_values: true, symbolize_keys: true)
+            Serialization::ValueCopy.call(
+              value,
+              freeze_values: true,
+              max_array_items: Serialization::Serializer::DEFAULT_MAX_ARRAY_ITEMS,
+              max_hash_keys: Serialization::Serializer::DEFAULT_MAX_HASH_KEYS,
+              max_string_bytes: Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
+              symbolize_keys: true
+            )
           end
 
           def delete_path!(target, path) = Deletion.delete_path!(target, path)

@@ -300,11 +300,11 @@ health
 ```
 
 Output lifecycle hooks are sync and local. Runtime timeouts provide one carried
-deadline while core walks destinations, but plain outputs do not receive the
-timeout value and core cannot interrupt blocking raw outputs. After the first
-attempted resource, exhausted deadlines skip later resources. Custom
-destinations own async drain, retry, reopen targets, rotation, and
-timeout-aware shutdown.
+deadline while core walks destinations. Plain outputs receive the timeout only
+when their lifecycle method accepts `timeout:` or `**kwargs`; core still cannot
+interrupt blocking raw output code. After the first attempted resource,
+exhausted deadlines skip later resources. Custom destinations own async drain,
+retry, reopen targets, rotation, and timeout-aware shutdown.
 
 Plain output writes are successful when `write` returns without raising and does
 not return `false`. A plain `false` is treated as a rejected write. A rejection
@@ -363,6 +363,8 @@ an immutable `Record` for formatters and destinations. `Record` is not a raw
 input builder; it is the read-only destination boundary. Use
 `Record.from_normalized_hash` only when an extension already owns a complete
 symbol-key normalized record hash and needs the immutable destination shape.
+That path validates the strict internal contract; it does not clean up
+JSON-style or user-input hashes. Use `RecordDraft.build` at raw boundaries.
 
 ## Public Facade
 

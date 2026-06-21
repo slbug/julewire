@@ -50,15 +50,16 @@ module Julewire
     end
 
     class TimeoutRecordingOutput < Julewire::Core::Destinations::SynchronizedOutput
-      attr_reader :close_count
+      attr_reader :close_count, :close_timeout
 
       def initialize
         super(StringIO.new)
         @close_count = 0
       end
 
-      def close
+      def close(timeout: nil)
         @close_count += 1
+        @close_timeout = timeout
       end
     end
 
@@ -174,6 +175,7 @@ module Julewire
       end
 
       assert_equal 1, old_output.close_count
+      assert_in_delta 0.25, old_output.close_timeout
     end
 
     def test_reconfigure_does_not_close_reused_owned_output

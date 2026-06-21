@@ -15,12 +15,12 @@ module Julewire
             clean_hash(execution, RELATIONSHIP_KEYS)
           end
 
-          def clean_owned_execution_hash(execution)
-            clean_hash!(execution, RELATIONSHIP_KEYS)
+          def clean_normalized_lazy_relationship_hash(execution)
+            clean_normalized_hash(execution, LAZY_RELATIONSHIP_KEYS)
           end
 
-          def clean_lazy_relationship_hash(execution)
-            clean_hash(execution, LAZY_RELATIONSHIP_KEYS)
+          def clean_owned_execution_hash(execution)
+            clean_hash!(execution, RELATIONSHIP_KEYS)
           end
 
           def from_execution_hash(execution)
@@ -47,6 +47,11 @@ module Julewire
 
           def clean_hash(execution, keys)
             copy = execution.is_a?(Hash) ? Fields::FieldSet.deep_symbolize_keys(execution) : {}
+            clean_hash!(copy, keys)
+          end
+
+          def clean_normalized_hash(execution, keys)
+            copy = execution.is_a?(Hash) ? execution.dup : {}
             clean_hash!(copy, keys)
           end
 
@@ -182,8 +187,7 @@ module Julewire
 
         def frozen_hash_copy(value)
           value.each_with_object({}) do |(key, field_value), copy|
-            copy[Fields::Internal.normalize_key(key)] =
-              Serialization::ValueCopy.call(field_value, freeze_values: true)
+            copy[key] = Serialization::ValueCopy.call(field_value, freeze_values: true)
           end
         end
       end

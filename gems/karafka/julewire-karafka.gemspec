@@ -34,7 +34,7 @@ Gem::Specification.new do |spec|
   spec.executables = []
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "julewire-core", ">= 1.0"
+  spec.add_dependency "julewire-core", ">= 1.0.1"
   spec.add_dependency "karafka", ">= 2.5"
   spec.add_dependency "waterdrop", ">= 2.10"
   spec.add_dependency "zeitwerk", ">= 2.8.1"

@@ -49,6 +49,17 @@ module Julewire
           transformed = @transform.call(value, key: key, path: path, original: @root, depth: depth)
           transformed.equal?(CONTINUE) ? value : transformed
         end
+
+        def truncation_metadata(fields)
+          TruncationMetadata.build(
+            fields,
+            key_style: :symbol,
+            max_array_items: @max_array_items,
+            max_depth: @max_depth,
+            max_hash_keys: @max_hash_keys,
+            max_string_bytes: @max_string_bytes
+          )
+        end
       end
     end
   end

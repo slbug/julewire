@@ -722,6 +722,68 @@ module Julewire
       )
     end
 
+    def test_source_location_helper_parses_quoted_backtrace_function
+      assert_equal(
+        { "file" => "/tmp/job.rb", "line" => "9", "function" => "perform" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:9:in `perform'")
+      )
+    end
+
+    def test_source_location_helper_keeps_half_quoted_backtrace_function
+      assert_equal(
+        { "file" => "/tmp/job.rb", "line" => "9", "function" => "`perform" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:9:in `perform")
+      )
+      assert_equal(
+        { "file" => "/tmp/job.rb", "line" => "9", "function" => "perform'" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:9:in perform'")
+      )
+    end
+
+    def test_source_location_helper_omits_empty_quoted_backtrace_function
+      assert_equal(
+        { "file" => "/tmp/job.rb", "line" => "9" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:9:in ''")
+      )
+    end
+
+    def test_source_location_helper_keeps_single_quote_backtrace_function
+      assert_equal(
+        { "file" => "/tmp/job.rb", "line" => "9", "function" => "'" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:9:in '")
+      )
+    end
+
+    def test_source_location_helper_parses_backtrace_without_function
+      assert_equal(
+        { "file" => "/tmp/job.rb", "line" => "9" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:9")
+      )
+    end
+
+    def test_source_location_helper_rejects_backtrace_without_file
+      assert_nil GCP::SourceLocation.from_backtrace_line(":9:in `perform'")
+    end
+
+    def test_source_location_helper_rejects_backtrace_without_numeric_line
+      assert_nil GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:line:in `perform'")
+    end
+
+    def test_source_location_helper_completes_on_adversarial_long_line
+      adversarial = "a:not-a-line#{":in `x" * 5_000}"
+
+      assert_nil GCP::SourceLocation.from_backtrace_line(adversarial)
+    end
+
+    def test_source_location_helper_parses_adversarial_long_function_line
+      function = "x" * 20_000
+
+      assert_equal(
+        { "file" => "/tmp/job.rb", "line" => "9", "function" => function },
+        GCP::SourceLocation.from_backtrace_line("/tmp/job.rb:9:in `#{function}'")
+      )
+    end
+
     def test_maps_source_location_special_field
       record = normalized_record(
         payload: GCP.source_location(

@@ -13,7 +13,8 @@ module Julewire
       setting :silence_log_subscriber, default: true, predicate: true
       setting :propagation, default: true, predicate: true
       setting :carrier_key, default: Julewire::Core::Propagation::Carrier::DEFAULT_KEY
-      setting :carrier_max_bytes, validate: byte_limit
+      setting :carrier_max_bytes, default: Julewire::Core::Propagation::Carrier::DEFAULT_MAX_BYTES,
+                                  validate: byte_limit
       setting :serialized_carrier_key, default: DEFAULT_SERIALIZED_CARRIER_KEY
       setting :source, default: "active_job"
       setting :summary_event, default: "job.completed"

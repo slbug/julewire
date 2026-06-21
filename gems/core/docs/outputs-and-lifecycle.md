@@ -74,8 +74,11 @@ for `$stdout`, caller-owned loggers, and shared objects.
 
 ## Synchronous Output
 
-Core wraps direct outputs with one mutex. Concurrent emitters do not interleave
-individual encoded records, but a slow sink blocks the emitting thread.
+Core wraps direct output writes with one mutex. Concurrent emitters do not
+interleave individual encoded records, but a slow sink blocks the emitting
+thread. `flush` is lifecycle-only and may overlap writes so slow flushes do not
+stall the emit path; direct outputs should be IO-like or internally safe for
+flush/write overlap. `close` is terminal and serialized with writes.
 
 A synchronous output failure is contained. The destination records output
 failure counters and calls `on_failure`. Core does not retry, back off, or

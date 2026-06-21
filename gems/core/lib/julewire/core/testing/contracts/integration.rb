@@ -76,7 +76,7 @@ module Julewire
 
             assert_equal "[FI...[Truncated]", result.fetch(:secret)
             assert_equal "abc...[Truncated]", result.fetch(:long)
-            assert_equal ["array_items"], result.dig(:list, 1, marker_key, "truncated_fields")
+            assert_equal ["array_items"], result.dig(:list, 1, marker_key, :truncated_fields)
           end
 
           def assert_julewire_integration_failure_contract(integration:, component:, exercise:)

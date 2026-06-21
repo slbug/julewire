@@ -91,14 +91,11 @@ module Julewire
       )
     end
 
-    def test_record_from_normalized_hash_defaults_missing_execution_to_empty_hash
+    def test_record_from_normalized_hash_rejects_missing_execution
       input = normalized_record
       input.delete(:execution)
 
-      record = Julewire::Core::Records::Record.from_normalized_hash(input)
-
-      assert_equal({}, record.fetch(:execution))
-      assert_equal 1, record.lineage.depth
+      assert_record_from_normalized_hash_rejects(input, "record must be complete (missing: execution)")
     end
 
     def test_record_from_normalized_hash_rejects_invalid_normalized_kind

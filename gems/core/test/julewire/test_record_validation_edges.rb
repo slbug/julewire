@@ -6,11 +6,63 @@ module Julewire
   class TestRecordValidationEdges < Minitest::Test
     cover Julewire::Core::Records::Record
 
+    class EqualHash < Hash
+      def hash = self.class.hash
+      def eql?(other) = other.is_a?(self.class)
+    end
+
+    class EqualArray < Array
+      def hash = self.class.hash
+      def eql?(other) = other.is_a?(self.class)
+    end
+
     def test_record_from_normalized_hash_rejects_string_subclass_keys
       key = Class.new(String).new("payload")
 
       error = assert_raises(TypeError) do
         Julewire::Core::Records::Record.from_normalized_hash(normalized_record.merge(key => {}))
+      end
+
+      assert_equal "record must not use string keys", error.message
+    end
+
+    def test_record_from_normalized_hash_rejects_nested_string_keys
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Record.from_normalized_hash(normalized_record(payload: { "id" => 1 }))
+      end
+
+      assert_equal "record must not use string keys", error.message
+    end
+
+    def test_record_from_normalized_hash_tracks_equal_hashes_by_identity
+      clean = EqualHash.new.merge!(safe: true)
+      unsafe = EqualHash.new.merge!("unsafe" => true)
+
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Record.from_normalized_hash(
+          normalized_record(payload: { clean: clean, unsafe: unsafe })
+        )
+      end
+
+      assert_equal "record must not use string keys", error.message
+    end
+
+    def test_record_from_normalized_hash_tracks_equal_arrays_by_identity
+      clean = EqualArray.new.push({ safe: true })
+      unsafe = EqualArray.new.push({ "unsafe" => true })
+
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Record.from_normalized_hash(
+          normalized_record(payload: { clean: clean, unsafe: unsafe })
+        )
+      end
+
+      assert_equal "record must not use string keys", error.message
+    end
+
+    def test_draft_from_normalized_hash_rejects_string_keys
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Draft.from_normalized_hash(normalized_record(payload: { "id" => 1 }))
       end
 
       assert_equal "record must not use string keys", error.message

@@ -10,7 +10,7 @@ module Julewire
 
     def test_clean_helpers_tolerate_non_hash_inputs
       assert_empty Julewire::Core::Execution::Lineage.clean_execution_hash("nope")
-      assert_empty Julewire::Core::Execution::Lineage.clean_lazy_relationship_hash("nope")
+      assert_empty Julewire::Core::Execution::Lineage.clean_normalized_lazy_relationship_hash("nope")
     end
 
     def test_from_execution_hash_tolerates_non_hash_inputs

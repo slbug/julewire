@@ -14,9 +14,9 @@ module Julewire
       serialized = Julewire::Core::Serialization::Serializer.call({ message: "abcdef" }, max_string_bytes: 3)
 
       assert_equal "abc...[Truncated]", serialized.fetch("message")
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["message"],
-                                 max_string_bytes: 3
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["message"],
+                                        max_string_bytes: 3
     end
 
     def test_serializer_truncates_arrays_and_marks_parent_field
@@ -24,12 +24,12 @@ module Julewire
       items = serialized.fetch("items")
 
       assert_equal [1, 2], items.first(2)
-      assert_truncation_metadata items.fetch(2).fetch(METADATA_KEY),
-                                 fields: ["array_items"],
-                                 max_array_items: 2
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["items"],
-                                 max_array_items: 2
+      assert_string_truncation_metadata items.fetch(2).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_array_items: 2
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["items"],
+                                        max_array_items: 2
     end
 
     def test_serializer_truncates_hash_keys_and_marks_hash
@@ -38,9 +38,9 @@ module Julewire
       assert_equal 1, serialized.fetch("a")
       assert_equal 2, serialized.fetch("b")
       refute_includes serialized, "c"
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["hash_keys"],
-                                 max_hash_keys: 2
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["hash_keys"],
+                                        max_hash_keys: 2
     end
 
     def test_serializer_can_compact_empty_values_during_serialization
@@ -83,7 +83,7 @@ module Julewire
       assert_equal({ "nil_value" => nil, "empty_hash" => {}, "empty_array" => [] }, serialized)
     end
 
-    def test_serializer_compact_empty_applies_limits_after_compaction
+    def test_serializer_compact_empty_counts_raw_entries_before_compaction
       serialized = Julewire::Core::Serialization::Serializer.call(
         {
           skipped: nil,
@@ -93,27 +93,27 @@ module Julewire
           third: 3
         },
         compact_empty: true,
-        max_hash_keys: 2
+        max_hash_keys: 3
       )
 
       assert_equal 1, serialized.fetch("first")
-      assert_equal 2, serialized.fetch("second")
+      refute_includes serialized, "second"
       refute_includes serialized, "third"
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["hash_keys"],
-                                 max_hash_keys: 2
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["hash_keys"],
+                                        max_hash_keys: 3
     end
 
     def test_serializer_marks_max_depth_hash_pruning
       serialized = Julewire::Core::Serialization::Serializer.call({ a: { b: { c: 1 } } }, max_depth: 2)
 
       assert_equal "[MaxDepth]", serialized.dig("a", "b")
-      assert_truncation_metadata serialized.fetch("a").fetch(METADATA_KEY),
-                                 fields: ["b"],
-                                 max_depth: 2
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["a"],
-                                 max_depth: 2
+      assert_string_truncation_metadata serialized.fetch("a").fetch(METADATA_KEY),
+                                        fields: ["b"],
+                                        max_depth: 2
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["a"],
+                                        max_depth: 2
     end
 
     def test_serializer_marks_max_depth_array_pruning
@@ -121,21 +121,21 @@ module Julewire
       items = serialized.fetch("items")
 
       assert_equal "[MaxDepth]", items.first
-      assert_truncation_metadata items.fetch(1).fetch(METADATA_KEY),
-                                 fields: ["array_items"],
-                                 max_depth: 2
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["items"],
-                                 max_depth: 2
+      assert_string_truncation_metadata items.fetch(1).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_depth: 2
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["items"],
+                                        max_depth: 2
     end
 
     def test_serializer_marks_top_level_array_depth_pruning
       serialized = Julewire::Core::Serialization::Serializer.call([[1]], max_depth: 1)
 
       assert_equal "[MaxDepth]", serialized.first
-      assert_truncation_metadata serialized.fetch(1).fetch(METADATA_KEY),
-                                 fields: ["array_items"],
-                                 max_depth: 1
+      assert_string_truncation_metadata serialized.fetch(1).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_depth: 1
     end
 
     def test_serializer_marks_compact_array_item_limit
@@ -148,12 +148,12 @@ module Julewire
       items = serialized.fetch("items")
 
       assert_equal [1, 2], items.first(2)
-      assert_truncation_metadata items.fetch(2).fetch(METADATA_KEY),
-                                 fields: ["array_items"],
-                                 max_array_items: 2
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["items"],
-                                 max_array_items: 2
+      assert_string_truncation_metadata items.fetch(2).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_array_items: 2
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["items"],
+                                        max_array_items: 2
     end
 
     def test_serializer_truncates_on_byte_boundary_without_invalid_utf8
@@ -176,9 +176,9 @@ module Julewire
                                                                   max_string_bytes: 6)
 
       assert_equal "123456...[Truncated]", serialized.fetch("decimal")
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["decimal"],
-                                 max_string_bytes: 6
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["decimal"],
+                                        max_string_bytes: 6
     end
 
     def test_serializer_does_not_treat_user_truncation_like_values_as_metadata
@@ -203,9 +203,9 @@ module Julewire
         max_string_bytes: 3
       )
 
-      assert_truncation_metadata serialized.fetch(METADATA_KEY),
-                                 fields: ["message"],
-                                 max_string_bytes: 3
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["message"],
+                                        max_string_bytes: 3
     end
 
     def test_serializer_rejects_negative_limits
@@ -252,14 +252,6 @@ module Julewire
         },
         array: [nil, {}, [], { removed: nil }, { keep: true }]
       }
-    end
-
-    def assert_truncation_metadata(metadata, fields:, **limits)
-      assert metadata.fetch("truncated")
-      assert_equal fields, metadata.fetch("truncated_fields")
-      limits.each do |key, value|
-        assert_equal value, metadata.dig("limits", key.to_s)
-      end
     end
   end
 

@@ -16,9 +16,9 @@ its registered events, `:all` uses the important profile. WaterDrop event
 severity is read from the event payload when present; otherwise errors are
 error and normal producer events are info.
 
-Set `carrier_max_bytes` to omit oversized propagation carriers from Kafka
-headers. When omitted, the message is still produced normally; it just does not
-carry upstream Julewire context.
+`carrier_max_bytes` defaults to `65_536`. Oversized propagation carriers are
+omitted from Kafka headers and ignored on restore. The message still moves
+normally; it just does not carry upstream Julewire context.
 
 Message keys, headers, and payload fields are raw unless an application installs
 a processor policy before output.

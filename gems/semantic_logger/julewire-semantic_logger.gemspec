@@ -32,7 +32,7 @@ Gem::Specification.new do |spec|
   spec.executables = []
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "julewire-core", ">= 1.0"
+  spec.add_dependency "julewire-core", ">= 1.0.1"
   spec.add_dependency "logger", ">= 1.7"
   spec.add_dependency "semantic_logger", ">= 4.18"
   spec.add_dependency "zeitwerk", ">= 2.8.1"
