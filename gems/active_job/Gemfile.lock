@@ -167,8 +167,13 @@ GEM
     zeitwerk (2.8.2)
 
 PLATFORMS
-  arm64-darwin-25
+  aarch64-linux
+  aarch64-linux-musl
+  arm64-darwin
   ruby
+  x86_64-darwin
+  x86_64-linux
+  x86_64-linux-musl
 
 DEPENDENCIES
   bundler-audit (>= 0.9)

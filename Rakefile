@@ -204,9 +204,21 @@ CUSTOM_GEMFILES = {
     gemfiles/rails_head.gemfile
   ]
 }.freeze
+BUNDLE_LOCK_PLATFORMS = %w[
+  ruby
+  aarch64-linux
+  aarch64-linux-musl
+  arm64-darwin
+  x86_64-darwin
+  x86_64-linux
+  x86_64-linux-musl
+].freeze
 BUNDLE_UPDATE_STEPS = [
   %w[update --all],
-  %w[update --bundler]
+  %w[update --bundler],
+  ["lock", "--add-platform", *BUNDLE_LOCK_PLATFORMS],
+  %w[lock --normalize-platforms],
+  %w[lock --add-checksums]
 ].freeze
 MUTANT_REQUIRES = {
   "gems/active_job" => "julewire-active_job",

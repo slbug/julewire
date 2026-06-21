@@ -28,11 +28,11 @@ jobs:
       semantic_logger: ${{ steps.filter.outputs.semantic_logger }}
       shared: ${{ steps.filter.outputs.shared }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     name: release metadata
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -97,7 +97,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -112,7 +112,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/core/coverage/lcov/lcov.info
@@ -131,7 +131,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -146,7 +146,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/active_job/coverage/lcov/lcov.info
@@ -165,7 +165,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -180,7 +180,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/gcp/coverage/lcov/lcov.info
@@ -199,7 +199,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -214,7 +214,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/karafka/coverage/lcov/lcov.info
@@ -233,7 +233,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -248,7 +248,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/rails/coverage/lcov/lcov.info
@@ -267,7 +267,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -282,7 +282,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/rack/coverage/lcov/lcov.info
@@ -295,7 +295,7 @@ jobs:
     runs-on: ubuntu-latest
     name: rails appraisal / Ruby 4.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -321,7 +321,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -336,7 +336,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/rails_support/coverage/lcov/lcov.info
@@ -355,7 +355,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -370,7 +370,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/redaction/coverage/lcov/lcov.info
@@ -389,7 +389,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -404,7 +404,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/semantic_logger/coverage/lcov/lcov.info
@@ -417,7 +417,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ractor / Ruby 4.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -432,7 +432,7 @@ jobs:
         run: COVERAGE=true bundle exec rake
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           use_oidc: true
           files: ./gems/ractor/coverage/lcov/lcov.info
@@ -458,7 +458,7 @@ jobs:
     runs-on: ubuntu-latest
     name: mutant / Ruby 4.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
