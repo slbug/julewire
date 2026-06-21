@@ -47,8 +47,8 @@ end
 
 def ensure_appraisal_bundle!(target)
   env = appraisal_test_env(target)
-  setup_command = [RbConfig.ruby, "-rbundler/setup", "-e", "exit"]
-  return if Bundler.with_unbundled_env { system(env, *setup_command) }
+  check_command = bundle_command("check")
+  return if Bundler.with_unbundled_env { system(env, *check_command, out: File::NULL, err: File::NULL) }
 
   Bundler.with_unbundled_env { sh(env, *bundle_command("install")) }
 end
