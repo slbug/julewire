@@ -28,7 +28,7 @@ jobs:
       semantic_logger: ${{ steps.filter.outputs.semantic_logger }}
       shared: ${{ steps.filter.outputs.shared }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -74,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     name: release metadata
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -97,7 +97,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -131,7 +131,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -165,7 +165,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -199,7 +199,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -233,7 +233,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -267,7 +267,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -295,7 +295,7 @@ jobs:
     runs-on: ubuntu-latest
     name: rails appraisal / Ruby 4.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -321,7 +321,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -355,7 +355,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -389,7 +389,7 @@ jobs:
           - '3.4'
           - '4.0'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -417,7 +417,7 @@ jobs:
     runs-on: ubuntu-latest
     name: ractor / Ruby 4.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -458,7 +458,7 @@ jobs:
     runs-on: ubuntu-latest
     name: mutant / Ruby 4.0
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
