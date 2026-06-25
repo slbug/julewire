@@ -169,8 +169,8 @@ module Julewire
         CIRCULAR_REFERENCE = Core::CIRCULAR_REFERENCE
         EMPTY_ARRAY = [].freeze
         EMPTY_HASH = {}.freeze
-        RESERVED_SYMBOL_KEYS = [Serializer::TRUNCATION_METADATA_KEY.to_sym].freeze
-        private_constant :EMPTY_ARRAY, :EMPTY_HASH, :RESERVED_SYMBOL_KEYS
+        RESERVED_KEYS = [Serializer::TRUNCATION_METADATA_KEY, Serializer::TRUNCATION_METADATA_KEY.to_sym].freeze
+        private_constant :EMPTY_ARRAY, :EMPTY_HASH, :RESERVED_KEYS
 
         class << self
           include ValueCopyCache
@@ -328,6 +328,8 @@ module Julewire
         end
 
         def copy_hash_entry(result, fields, key, item, depth)
+          return copy_truncation_metadata_entry(result, fields, key, item, depth) if reserved_truncation_key?(key)
+
           copied = copy_value(item, depth + 1)
           child_truncated = consume_truncated
           return fields if @compact_empty && self.class.omitted_empty?(copied)
@@ -336,6 +338,26 @@ module Julewire
           key_truncated = consume_truncated
           result[copied_key] = copied
           record_hash_truncation(fields, copied_key, key_truncated || child_truncated)
+        end
+
+        def copy_truncation_metadata_entry(result, fields, key, item, depth)
+          raise_reserved_key!(key) unless allowed_truncation_metadata_key?(key) && TruncationMetadata.valid?(item)
+
+          result[copy_truncation_metadata_key(key)] = copy_value(item, depth + 1)
+          consume_truncated
+          fields
+        end
+
+        def allowed_truncation_metadata_key?(key)
+          key.is_a?(Symbol) || @symbolize_keys
+        end
+
+        def reserved_truncation_key?(key)
+          key == Serializer::TRUNCATION_METADATA_KEY || key == Serializer::TRUNCATION_METADATA_KEY.to_sym
+        end
+
+        def copy_truncation_metadata_key(key)
+          @symbolize_keys && key.is_a?(String) ? key.to_sym : key
         end
 
         def copy_array(value, depth)
@@ -378,7 +400,7 @@ module Julewire
         end
 
         def raise_reserved_key!(key)
-          return unless RESERVED_SYMBOL_KEYS.include?(key)
+          return unless RESERVED_KEYS.include?(key)
 
           raise ArgumentError, "#{Serializer::TRUNCATION_METADATA_KEY} is reserved for Julewire truncation metadata"
         end

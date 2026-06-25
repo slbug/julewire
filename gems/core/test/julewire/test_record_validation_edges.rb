@@ -27,45 +27,19 @@ module Julewire
     end
 
     def test_record_from_normalized_hash_rejects_nested_string_keys
-      error = assert_raises(TypeError) do
-        Julewire::Core::Records::Record.from_normalized_hash(normalized_record(payload: { "id" => 1 }))
-      end
-
-      assert_equal "record must not use string keys", error.message
+      assert_record_rejects_string_keys(normalized_record(payload: { "id" => 1 }))
     end
 
-    def test_record_from_normalized_hash_tracks_equal_hashes_by_identity
-      clean = EqualHash.new.merge!(safe: true)
-      unsafe = EqualHash.new.merge!("unsafe" => true)
-
-      error = assert_raises(TypeError) do
-        Julewire::Core::Records::Record.from_normalized_hash(
-          normalized_record(payload: { clean: clean, unsafe: unsafe })
-        )
+    def test_record_from_normalized_hash_tracks_equal_containers_by_identity
+      equal_container_cases.each do |clean, unsafe|
+        assert_record_rejects_string_keys(normalized_record(payload: { clean: clean, unsafe: unsafe }))
       end
-
-      assert_equal "record must not use string keys", error.message
-    end
-
-    def test_record_from_normalized_hash_tracks_equal_arrays_by_identity
-      clean = EqualArray.new.push({ safe: true })
-      unsafe = EqualArray.new.push({ "unsafe" => true })
-
-      error = assert_raises(TypeError) do
-        Julewire::Core::Records::Record.from_normalized_hash(
-          normalized_record(payload: { clean: clean, unsafe: unsafe })
-        )
-      end
-
-      assert_equal "record must not use string keys", error.message
     end
 
     def test_draft_from_normalized_hash_rejects_string_keys
-      error = assert_raises(TypeError) do
-        Julewire::Core::Records::Draft.from_normalized_hash(normalized_record(payload: { "id" => 1 }))
+      assert_record_rejects_string_keys(normalized_record(payload: { "id" => 1 })) do |record|
+        Julewire::Core::Records::Draft.from_normalized_hash(record)
       end
-
-      assert_equal "record must not use string keys", error.message
     end
 
     def test_record_from_normalized_hash_lists_multiple_unknown_top_level_keys
@@ -90,6 +64,27 @@ module Julewire
       record = Julewire::Core::Records::Record.from_normalized_hash(normalized_record(error: error_hash))
 
       assert_equal({ class: "RuntimeError" }, record.fetch(:error))
+    end
+
+    private
+
+    def assert_record_rejects_string_keys(record)
+      error = assert_raises(TypeError) do
+        if block_given?
+          yield(record)
+        else
+          Julewire::Core::Records::Record.from_normalized_hash(record)
+        end
+      end
+
+      assert_equal "record must not use string keys", error.message
+    end
+
+    def equal_container_cases
+      [
+        [EqualHash.new.merge!(safe: true), EqualHash.new.merge!("unsafe" => true)],
+        [EqualArray.new.push({ safe: true }), EqualArray.new.push({ "unsafe" => true })]
+      ]
     end
   end
 end

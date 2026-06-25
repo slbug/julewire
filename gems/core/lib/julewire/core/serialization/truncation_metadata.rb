@@ -24,7 +24,16 @@ module Julewire
             max_string_bytes: :max_string_bytes
           }.freeze
         }.freeze
-        private_constant :KEYS
+        METADATA_KEYS = KEYS.fetch(:symbol).values_at(:truncated, :truncated_fields, :limits).freeze
+        METADATA_KEY_NAMES = METADATA_KEYS.map(&:to_s).freeze
+        LIMIT_KEYS = KEYS.fetch(:symbol).values_at(
+          :max_array_items,
+          :max_depth,
+          :max_hash_keys,
+          :max_string_bytes
+        ).freeze
+        LIMIT_KEY_NAMES = LIMIT_KEYS.map(&:to_s).freeze
+        private_constant :KEYS, :METADATA_KEYS, :METADATA_KEY_NAMES, :LIMIT_KEYS, :LIMIT_KEY_NAMES
 
         class << self
           def build(fields, max_array_items:, max_depth:, max_hash_keys:, max_string_bytes:, key_style: :string,
@@ -52,6 +61,16 @@ module Julewire
             fields
           end
 
+          def valid?(value)
+            return false unless value.is_a?(Hash)
+            return false unless valid_top_level_keys?(value)
+            return false unless fetch_key(value, :truncated) == true
+
+            fields = fetch_key(value, :truncated_fields)
+            limits = fetch_key(value, :limits)
+            valid_fields?(fields) && valid_limits?(limits)
+          end
+
           private
 
           def field_list(fields)
@@ -73,6 +92,33 @@ module Julewire
             metadata.fetch(keys.fetch(:truncated_fields)).freeze
             metadata.fetch(keys.fetch(:limits)).freeze
             metadata.freeze
+          end
+
+          def fetch_key(value, key)
+            return value[key] if value.key?(key)
+
+            value[key.to_s]
+          end
+
+          def valid_top_level_keys?(value)
+            value.keys.all? { known_key?(it, METADATA_KEYS, METADATA_KEY_NAMES) } &&
+              METADATA_KEYS.all? { value.key?(it) || value.key?(it.to_s) }
+          end
+
+          def valid_fields?(fields)
+            fields.is_a?(Array) && fields.all? { it.is_a?(String) || it.is_a?(Symbol) }
+          end
+
+          def valid_limits?(limits)
+            return false unless limits.is_a?(Hash)
+
+            limits.all? do |key, value|
+              known_key?(key, LIMIT_KEYS, LIMIT_KEY_NAMES) && (value.nil? || value.is_a?(Integer))
+            end
+          end
+
+          def known_key?(key, symbol_keys, string_keys)
+            symbol_keys.include?(key) || string_keys.include?(key)
           end
         end
       end

@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 1.0.1 - 2026-06-21
+## 1.0.1 - 2026-06-25
 
 - Reserve ractor destination queue slots before send and roll them back on
   send failure.

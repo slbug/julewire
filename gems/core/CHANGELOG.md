@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 1.0.1 - 2026-06-21
+## 1.0.1 - 2026-06-25
 
 - Harden bounded traversal, ingress copying, and carrier extraction against
   noisy or hostile record shapes.

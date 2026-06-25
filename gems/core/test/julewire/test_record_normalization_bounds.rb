@@ -150,26 +150,6 @@ module Julewire
                                         max_array_items: 1
     end
 
-    def test_value_copy_rejects_reserved_truncation_metadata_key_at_symbol_ingress
-      error = assert_raises(ArgumentError) do
-        Julewire::Core::Fields::FieldSet.deep_symbolize_keys("_julewire_truncation" => { "user" => true })
-      end
-
-      assert_equal "_julewire_truncation is reserved for Julewire truncation metadata", error.message
-    end
-
-    def test_value_copy_rejects_reserved_truncation_metadata_symbol_key_without_symbolizing
-      error = assert_raises(ArgumentError) do
-        Julewire::Core::Serialization::ValueCopy.call(
-          { _julewire_truncation: "user", other: "value" },
-          max_hash_keys: 1,
-          symbolize_keys: false
-        )
-      end
-
-      assert_equal "_julewire_truncation is reserved for Julewire truncation metadata", error.message
-    end
-
     def test_value_copy_truncation_metadata_omits_unconfigured_optional_limits
       copied = Julewire::Core::Serialization::ValueCopy.call(
         { message: "abcdef" },

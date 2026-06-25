@@ -72,6 +72,7 @@ module Julewire
         current_field_hash(:neutral)
       end
 
+      # SectionProxy dispatches these dynamically from the public field readers.
       def context_value(key, default:)
         current_field_stack(:context).value_for(key, default: default)
       end

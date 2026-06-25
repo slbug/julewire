@@ -132,30 +132,16 @@ module Julewire
       )
     end
 
-    def test_request_body_capture_uses_raw_post_when_content_length_fits_limit
-      request = double_raw_post_with_body_stream(
-        raw_post: "raw",
-        content_length: "3",
-        body: raising_read_stream
-      )
+    def test_request_body_capture_uses_raw_post_when_content_length_is_within_limit
+      raw_post_fast_path_cases.each do |body, limit|
+        request = double_raw_post_with_body_stream(
+          raw_post: body,
+          content_length: body.bytesize.to_s,
+          body: raising_read_stream
+        )
 
-      assert_equal(
-        { "request_body" => "raw", "request_body_bytes" => 3, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: 5))
-      )
-    end
-
-    def test_request_body_capture_uses_raw_post_when_content_length_equals_limit
-      request = double_raw_post_with_body_stream(
-        raw_post: '{"ok":true}',
-        content_length: "11",
-        body: raising_read_stream
-      )
-
-      assert_equal(
-        { "request_body" => '{"ok":true}', "request_body_bytes" => 11, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: 11))
-      )
+        assert_captured_request_body(request, body, limit: limit)
+      end
     end
 
     def test_request_body_capture_uses_bounded_stream_when_content_length_exceeds_limit
@@ -188,49 +174,34 @@ module Julewire
     def test_request_body_capture_reads_stream_without_position_support
       request = double_body(no_position_stream("body"))
 
-      assert_equal(
-        { "request_body" => "body", "request_body_bytes" => 4, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: nil))
-      )
+      assert_captured_request_body(request, "body", limit: nil)
     end
 
     def test_request_body_capture_coerces_stream_read_value_with_to_str
       request = double_body(no_position_stream(string_like("body")))
 
-      assert_equal(
-        { "request_body" => "body", "request_body_bytes" => 4, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: nil))
-      )
+      assert_captured_request_body(request, "body", limit: nil)
     end
 
     def test_request_body_capture_does_not_restore_missing_position
       stream = no_position_writer_stream("body")
       request = double_body(stream)
 
-      assert_equal(
-        { "request_body" => "body", "request_body_bytes" => 4, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: nil))
-      )
+      assert_captured_request_body(request, "body", limit: nil)
       assert_empty stream.assigned_positions
     end
 
     def test_request_body_capture_contains_position_restore_failure
       request = double_body(failing_position_restore_stream("body"))
 
-      assert_equal(
-        { "request_body" => "body", "request_body_bytes" => 4, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: nil))
-      )
+      assert_captured_request_body(request, "body", limit: nil)
     end
 
     def test_request_body_capture_reads_stream_without_rewind_support
       stream = no_rewind_position_stream("body")
       request = double_body(stream)
 
-      assert_equal(
-        { "request_body" => "body", "request_body_bytes" => 4, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: nil))
-      )
+      assert_captured_request_body(request, "body", limit: nil)
       assert_equal 0, stream.pos
     end
 
@@ -249,14 +220,8 @@ module Julewire
       zero_stream = limit_tracking_stream("zero")
       negative_stream = limit_tracking_stream("negative")
 
-      assert_equal(
-        { "request_body" => "zero", "request_body_bytes" => 4, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(double_body(zero_stream, content_length: "0"), limit: 10))
-      )
-      assert_equal(
-        { "request_body" => "negative", "request_body_bytes" => 8, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(double_body(negative_stream, content_length: "-1"), limit: 10))
-      )
+      assert_captured_request_body(double_body(zero_stream, content_length: "0"), "zero", limit: 10)
+      assert_captured_request_body(double_body(negative_stream, content_length: "-1"), "negative", limit: 10)
       assert_equal [11], zero_stream.limits
       assert_equal [11], negative_stream.limits
     end
@@ -278,19 +243,13 @@ module Julewire
     def test_request_body_capture_does_not_mark_under_limit_body_as_truncated
       request = json_request('{"ok":true}')
 
-      assert_equal(
-        { "request_body" => '{"ok":true}', "request_body_bytes" => 11, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: 20))
-      )
+      assert_captured_request_body(request, '{"ok":true}', bytes: 11, limit: 20)
     end
 
     def test_request_body_capture_does_not_mark_exact_limit_body_as_truncated
       request = json_request('{"ok":true}')
 
-      assert_equal(
-        { "request_body" => '{"ok":true}', "request_body_bytes" => 11, "request_body_truncated" => false },
-        stringify_keys(request_body_fields(request, limit: 11))
-      )
+      assert_captured_request_body(request, '{"ok":true}', bytes: 11, limit: 11)
     end
 
     def test_request_body_capture_omits_empty_untruncated_body
@@ -531,6 +490,20 @@ module Julewire
 
     def response_body_fields(response, **)
       Julewire::Rack::Capture::BufferedResponseBody.call(response, content_types: true, **)
+    end
+
+    def assert_captured_request_body(request, body, bytes: body.bytesize, truncated: false, **)
+      assert_equal(
+        { "request_body" => body, "request_body_bytes" => bytes, "request_body_truncated" => truncated },
+        stringify_keys(request_body_fields(request, **))
+      )
+    end
+
+    def raw_post_fast_path_cases
+      [
+        ["raw", 5],
+        ['{"ok":true}', 11]
+      ]
     end
 
     def double_content_type(value)

@@ -281,6 +281,8 @@ module Julewire
       end
 
       def release_slot
+        return unless @max_queue.positive?
+
         loop do
           current = @in_flight.value
           if current <= 0

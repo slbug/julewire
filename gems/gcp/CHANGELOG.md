@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 1.0.1 - 2026-06-21
+## 1.0.1 - 2026-06-25
 
 - Replace the fallback backtrace regex with deterministic parsing so GCP source
   location inference stays boring under CodeQL.

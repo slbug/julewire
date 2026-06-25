@@ -1,6 +1,6 @@
 ## Unreleased
 
-## 1.0.1 - 2026-06-21
+## 1.0.1 - 2026-06-25
 
 - Report destination callback failures in health, matching core destinations.
 - Require julewire-core 1.0.1.

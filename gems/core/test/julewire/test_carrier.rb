@@ -140,6 +140,18 @@ module Julewire
       assert_equal({ request_id: "request-1" }, observed)
     end
 
+    def test_restore_preserves_julewire_truncation_metadata
+      encoded = Core::Propagation::Carrier.encode(envelope: { context: { blob: "x" * 20_000 } })
+      carrier = { "julewire" => encoded }
+
+      observed = Core::Propagation::Carrier.restore(carrier) { Julewire.context.to_h }
+
+      assert_match(/\Ax+\.\.\.\[Truncated\]\z/, observed.fetch(:blob))
+      assert_symbol_truncation_metadata observed.fetch(:_julewire_truncation),
+                                        fields: ["blob"],
+                                        max_string_bytes: Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES
+    end
+
     def test_extract_validates_max_bytes
       error = assert_raises(ArgumentError) do
         Core::Propagation::Carrier.extract({}, max_bytes: 0)
