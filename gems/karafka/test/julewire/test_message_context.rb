@@ -82,6 +82,18 @@ module Julewire
       assert_equal :oversized, failure.fetch(:status)
     end
 
+    def test_with_message_restores_truncated_carrier_context
+      records = capture_records
+
+      Julewire::Karafka.with_message(karafka_message(headers: carrier_with_truncated_context, offsets: [42])) do
+        Julewire.emit(event: "kafka.point", source: "test")
+      end
+
+      context = records.find { it[:event] == "kafka.point" }.fetch(:context)
+
+      assert_truncated_context(context)
+    end
+
     def test_with_message_ignores_non_hash_filtered_carrier
       point, = emit_with_carrier_filter(->(*) { "not-a-carrier" })
 
@@ -185,6 +197,24 @@ module Julewire
         Julewire.context.add(request_id: request_id)
         Julewire::Core::Propagation::Carrier.inject({})
       end
+    end
+
+    def carrier_with_truncated_context
+      {
+        "julewire" => Julewire::Core::Propagation::Carrier.encode(
+          envelope: { context: { blob: "x" * 20_000 } }
+        )
+      }
+    end
+
+    def assert_truncated_context(context)
+      assert_match(/\Ax+\.\.\.\[Truncated\]\z/, context.fetch(:blob))
+      metadata = context.fetch(:_julewire_truncation)
+
+      assert metadata.fetch(:truncated)
+      assert_equal ["blob"], metadata.fetch(:truncated_fields)
+      assert_equal Julewire::Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
+                   metadata.dig(:limits, :max_string_bytes)
     end
 
     def emit_with_carrier_filter(filter)

@@ -566,4 +566,5 @@ runtimes fail when called, so application code should not replace it casually.
 
 Core exposes the bridge SPI runtime envelope hook used by bridge code. The hook
 accepts detached input, context, attributes, carry, neutral data, and a scope
-snapshot, then routes them through the active pipeline.
+snapshot, then routes them through the active pipeline. Bridge code may pass
+`owned: true` only for data decoded from Julewire-owned wire formats.

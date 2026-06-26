@@ -33,6 +33,9 @@ module Julewire
           :max_string_bytes
         ).freeze
         LIMIT_KEY_NAMES = LIMIT_KEYS.map(&:to_s).freeze
+        [KEYS, METADATA_KEYS, METADATA_KEY_NAMES, LIMIT_KEYS, LIMIT_KEY_NAMES].each do |constant|
+          ::Ractor.make_shareable(constant) if defined?(::Ractor) && ::Ractor.respond_to?(:make_shareable)
+        end
         private_constant :KEYS, :METADATA_KEYS, :METADATA_KEY_NAMES, :LIMIT_KEYS, :LIMIT_KEY_NAMES
 
         class << self

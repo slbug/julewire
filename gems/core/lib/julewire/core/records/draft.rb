@@ -554,7 +554,12 @@ module Julewire
           def normalized_hash(value)
             return empty_hash if value.is_a?(Hash) && value.empty?
 
-            return value if @input_owned && !@freeze_sections && value.is_a?(Hash)
+            if @input_owned
+              return Fields::Internal.frozen_deep_symbolize_owned_keys(value) if @freeze_sections
+              return value if value.is_a?(Hash)
+
+              return Fields::FieldSet.deep_symbolize_owned_keys(value)
+            end
             return Fields::Internal.frozen_deep_symbolize_keys(value) if @freeze_sections
 
             Fields::FieldSet.deep_symbolize_keys(value)

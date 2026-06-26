@@ -74,6 +74,19 @@ module Julewire
       assert_equal :oversized, failure.fetch(:status)
     end
 
+    def test_job_execution_restores_truncated_carrier_context
+      records = capture_records
+      job = fake_job
+      job.instance_variable_set(:@julewire_carrier, carrier_with_truncated_context)
+
+      emit_job_point(job, Julewire::ActiveJob::Configuration.new)
+
+      context = records.find { it[:event] == "job.point" }.fetch(:context)
+
+      assert_truncated_context(context)
+      assert_equal "job-1", context.fetch(:job_id)
+    end
+
     def test_job_execution_records_error_summary_and_reraises
       records = capture_records
 
@@ -167,6 +180,24 @@ module Julewire
       Julewire.context.with(request_id: "request-1") do
         Julewire::Core::Propagation::Carrier.inject({})
       end
+    end
+
+    def carrier_with_truncated_context
+      {
+        "julewire" => Julewire::Core::Propagation::Carrier.encode(
+          envelope: { context: { blob: "x" * 20_000 } }
+        )
+      }
+    end
+
+    def assert_truncated_context(context)
+      assert_match(/\Ax+\.\.\.\[Truncated\]\z/, context.fetch(:blob))
+      metadata = context.fetch(:_julewire_truncation)
+
+      assert metadata.fetch(:truncated)
+      assert_equal ["blob"], metadata.fetch(:truncated_fields)
+      assert_equal Julewire::Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
+                   metadata.dig(:limits, :max_string_bytes)
     end
 
     def assert_job_point_without_restored_request(records)

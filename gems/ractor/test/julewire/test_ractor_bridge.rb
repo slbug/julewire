@@ -949,8 +949,9 @@ module Julewire
     def test_ractor_bridge_dispatches_remote_emit_requests
       runtime = Object.new
       received = []
-      runtime.define_singleton_method(:emit_envelope) do |input:, context:, carry:, attributes:, neutral:, scope:|
-        received << [input, context, carry, attributes, neutral, scope]
+      runtime.define_singleton_method(:emit_envelope) do |input:, context:, carry:, attributes:, neutral:, scope:,
+                                                          owned: false|
+        received << [input, context, carry, attributes, neutral, scope, owned]
         "formatted"
       end
 
@@ -961,23 +962,15 @@ module Julewire
       )
 
       assert_equal "formatted", result
-      input, context, carry, attributes, neutral, scope = received.fetch(0)
-
-      assert_equal remote_emit_arguments[0], input
-      assert_equal remote_emit_arguments[1], context
-      assert_equal remote_emit_arguments[2], carry
-      assert_equal remote_emit_arguments[3], attributes
-      assert_equal remote_emit_arguments[4], neutral
-      assert_instance_of Julewire::Core::Execution::ScopeSnapshot, scope
-      assert_empty scope.execution_hash
+      assert_remote_emit_dispatch(received.fetch(0))
     end
 
     def test_ractor_bridge_dispatches_remote_emit_without_level_requests
       runtime = Object.new
       received = []
       runtime.define_singleton_method(:emit_envelope) do |input:, context:, carry:, attributes:, neutral:, scope:,
-                                                          enforce_level: true|
-        received << [input, context, carry, attributes, neutral, scope, enforce_level]
+                                                          enforce_level: true, owned: false|
+        received << [input, context, carry, attributes, neutral, scope, enforce_level, owned]
       end
 
       Julewire::Ractor::Bridge.__send__(
@@ -987,6 +980,7 @@ module Julewire
       )
 
       refute received.fetch(0).fetch(6)
+      assert received.fetch(0).fetch(7)
     end
 
     def test_runtime_dispatches_remote_emit_without_level_below_parent_threshold
@@ -1007,6 +1001,19 @@ module Julewire
       )
 
       assert_equal "debug", JSON.parse(output.string).fetch("message")
+    end
+
+    def assert_remote_emit_dispatch(received)
+      input, context, carry, attributes, neutral, scope, owned = received
+
+      assert_equal remote_emit_arguments[0], input
+      assert_equal remote_emit_arguments[1], context
+      assert_equal remote_emit_arguments[2], carry
+      assert_equal remote_emit_arguments[3], attributes
+      assert_equal remote_emit_arguments[4], neutral
+      assert owned
+      assert_instance_of Julewire::Core::Execution::ScopeSnapshot, scope
+      assert_empty scope.execution_hash
     end
 
     def test_ractor_bridge_dispatches_summary_records

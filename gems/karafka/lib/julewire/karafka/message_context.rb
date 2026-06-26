@@ -17,7 +17,7 @@ module Julewire
           )
           record_carrier_restore_failure(result)
 
-          Julewire::Core::Propagation.restore(result.envelope) do
+          Julewire::Core::Propagation.restore(result.envelope, owned: true) do
             Julewire::Core::Integration::Facade.with_neutral(message_neutral(fields)) do
               Julewire::Core::Integration::Facade.with_attributes(message_attributes(fields), &)
             end

@@ -32,8 +32,9 @@ identity or class.
 The serialized envelope is a ractor concern. Core keeps only the narrow
 `emit_envelope` hook that accepts already-extracted input, context, carry, and
 a scope snapshot. Payload parsing and scope reconstruction stay in this gem.
-That hook is parent-runtime SPI; the child `RemoteRuntime` exposes the normal
-facade emit methods instead of a detached-envelope API.
+That hook is parent-runtime SPI; the bridge marks ractor wire data as owned, and
+the child `RemoteRuntime` exposes the normal facade emit methods instead of a
+detached-envelope API.
 
 ## Available in Child
 

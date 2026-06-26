@@ -70,7 +70,7 @@ module Julewire
             Julewire::Core::RuntimeLocator.current = Julewire::Ractor::RemoteRuntime.new(
               port: bridge_port, emit_non_standard_exception_summaries: emit_non_standard_summaries
             )
-            Julewire::Core::Propagation.restore(captured_envelope) do
+            Julewire::Core::Propagation.restore(captured_envelope, owned: true) do
               callable.call(*call_args)
             end
           ensure
@@ -113,7 +113,7 @@ module Julewire
           payload = RemotePayload.hash_value(message, :payload)
           arguments = RemotePayload.extract(payload)
           arguments[:enforce_level] = false unless enforce_level
-          runtime.emit_envelope(**arguments)
+          runtime.emit_envelope(**arguments, owned: true)
         end
 
         def reply_to(message, response)

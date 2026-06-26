@@ -17,7 +17,7 @@ module Julewire
           )
           record_carrier_restore_failure(result)
 
-          Julewire::Core::Propagation.restore(result.envelope) do
+          Julewire::Core::Propagation.restore(result.envelope, owned: true) do
             perform_job(job, configuration, &)
           end
         end
