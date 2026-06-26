@@ -78,8 +78,8 @@ module Julewire
       assert_equal "[MaxDepth]", result.dig(:deep, :nested, :value)
       assert_equal "abc...[Truncated]", result[:long]
       assert_equal "abc...[Truncated]", result.dig(:list, 0)
-      assert result.dig(:list, 1, :_julewire_truncation, "truncated")
-      assert result.dig(:_julewire_truncation, "truncated")
+      assert result.dig(:list, 1, :_julewire_truncation, :truncated)
+      assert result.dig(:_julewire_truncation, :truncated)
     end
 
     def test_handles_hash_array_and_string_subclasses
@@ -112,7 +112,25 @@ module Julewire
 
       assert_equal "abc...[Truncated]", result.fetch(:long)
       assert_equal "ok", result.fetch(:short)
-      assert_equal ["long"], result.dig(:_julewire_truncation, "truncated_fields")
+      assert_equal ["long"], result.dig(:_julewire_truncation, :truncated_fields)
+    end
+
+    def test_truncation_metadata_deduplicates_repeated_fields
+      result = Julewire::Core::Serialization::BoundedTransform.call(
+        { items: %w[abcdef ghijkl] },
+        max_string_bytes: 3
+      )
+
+      assert_equal ["array_items"], result.dig(:items, 2, :_julewire_truncation, :truncated_fields)
+    end
+
+    def test_public_truncation_metadata_owns_deduplicated_field_list
+      fields = %w[array_items array_items]
+
+      metadata = Julewire::Core::Serialization::Serializer.truncation_metadata(fields)
+      fields << "hash_keys"
+
+      assert_equal ["array_items"], metadata.fetch("truncated_fields")
     end
 
     def test_truncation_metadata_reports_all_limits
@@ -124,14 +142,14 @@ module Julewire
         max_string_bytes: 5
       )
 
-      limits = result.dig(:_julewire_truncation, "limits")
+      limits = result.dig(:_julewire_truncation, :limits)
 
-      assert result.dig(:_julewire_truncation, "truncated")
-      assert_equal ["hash_keys"], result.dig(:_julewire_truncation, "truncated_fields")
-      assert_equal 7, limits.fetch("max_array_items")
-      assert_equal 3, limits.fetch("max_depth")
-      assert_equal 1, limits.fetch("max_hash_keys")
-      assert_equal 5, limits.fetch("max_string_bytes")
+      assert result.dig(:_julewire_truncation, :truncated)
+      assert_equal ["hash_keys"], result.dig(:_julewire_truncation, :truncated_fields)
+      assert_equal 7, limits.fetch(:max_array_items)
+      assert_equal 3, limits.fetch(:max_depth)
+      assert_equal 1, limits.fetch(:max_hash_keys)
+      assert_equal 5, limits.fetch(:max_string_bytes)
     end
 
     def test_transform_stage_errors_bubble
@@ -170,8 +188,8 @@ module Julewire
       result = Julewire::Core::Serialization::BoundedTransform.call(value)
 
       assert_equal "[Circular]", result.fetch(:self)
-      assert result.dig(:_julewire_truncation, "truncated")
-      assert_includes result.dig(:_julewire_truncation, "truncated_fields"), "self"
+      assert result.dig(:_julewire_truncation, :truncated)
+      assert_includes result.dig(:_julewire_truncation, :truncated_fields), "self"
     end
 
     def test_rejects_invalid_limits

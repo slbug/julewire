@@ -7,7 +7,7 @@ module Julewire
     cover Julewire::Rack
 
     def test_exposes_version
-      assert_equal "1.0.0", Julewire::Rack::VERSION
+      assert_equal "1.0.1", Julewire::Rack::VERSION
     end
 
     def test_error_inherits_julewire_error

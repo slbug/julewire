@@ -43,7 +43,8 @@ module Julewire
       setting :propagation, default: true, predicate: true
       setting :carrier_filter
       setting :carrier_key, default: Julewire::Core::Propagation::Carrier::DEFAULT_KEY
-      setting :carrier_max_bytes, validate: byte_limit
+      setting :carrier_max_bytes, default: Julewire::Core::Propagation::Carrier::DEFAULT_MAX_BYTES,
+                                  validate: byte_limit
       setting :source, default: "karafka"
       setting :consumer_event_names, default: :important
       setting :producer_event_names, default: :important

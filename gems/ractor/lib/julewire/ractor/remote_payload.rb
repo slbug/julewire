@@ -20,7 +20,10 @@ module Julewire
 
         def input_value(payload)
           value = Core::Integration::Values::Read.hash_value(payload, :input, default: MISSING)
-          value.equal?(MISSING) ? {} : value
+          return {} if value.equal?(MISSING)
+          return Core::Fields::FieldSet.deep_symbolize_owned_keys(value) if value.is_a?(Hash)
+
+          value
         end
 
         def scope_snapshot(scope_payload)
@@ -35,7 +38,7 @@ module Julewire
 
         def hash_value(hash, key)
           value = Core::Integration::Values::Read.hash_value(hash, key)
-          value.is_a?(Hash) ? Core::Fields::FieldSet.deep_symbolize_keys(value) : {}
+          value.is_a?(Hash) ? Core::Fields::FieldSet.deep_symbolize_owned_keys(value) : {}
         end
       end
     end

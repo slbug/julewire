@@ -12,6 +12,7 @@ module Julewire
         queued
         received
         send_error
+        slot_underflow_ignored
         worker_accepted
         worker_dropped
       ].freeze
@@ -58,15 +59,17 @@ module Julewire
       def emit(record)
         increment(:received)
         return drop(:closed_dropped, record) if closed?
-        return drop(:queue_full_dropped, record) if queue_full?
+        return drop(:queue_full_dropped, record) unless reserve_slot
 
-        @port.send({ command: :emit, record: record })
-        @in_flight.increment
-        increment(:queued)
+        begin
+          @port.send({ command: :emit, record: record })
+          increment(:queued)
+        rescue StandardError => e
+          release_slot
+          record_failure(e, phase: :ractor_send)
+          drop(:send_error, record)
+        end
         nil
-      rescue StandardError => e
-        record_failure(e, phase: :ractor_send)
-        drop(:send_error, record)
       end
 
       def flush(timeout: nil)
@@ -227,8 +230,16 @@ module Julewire
         PortLifecycle.close(timeout_port) if defined?(timeout_port) && timeout_port
       end
 
-      def queue_full?
-        @max_queue.positive? && @in_flight.value >= @max_queue
+      def reserve_slot
+        return true unless @max_queue.positive?
+
+        # MRI normally settles this in one pass under the GVL; the CAS loop keeps
+        # the reservation honest when multiple emitters race.
+        loop do
+          current = @in_flight.value
+          return false if current >= @max_queue
+          return true if @in_flight.compare_and_set(current, current + 1)
+        end
       end
 
       def closed? = @closed.get
@@ -269,8 +280,23 @@ module Julewire
         nil
       end
 
+      def release_slot
+        return unless @max_queue.positive?
+
+        loop do
+          current = @in_flight.value
+          if current <= 0
+            # Late or duplicate ACKs can arrive after teardown/reset; keep them visible
+            # without treating the ignored underflow as an operator-facing defect.
+            increment(:slot_underflow_ignored)
+            return
+          end
+          return if @in_flight.compare_and_set(current, current - 1)
+        end
+      end
+
       def decrement_in_flight
-        @in_flight.decrement if @in_flight.value.positive?
+        release_slot
       end
 
       def increment(key)

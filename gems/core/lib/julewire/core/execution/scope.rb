@@ -109,12 +109,12 @@ module Julewire
           @fields.with(section, fields, owned: owned, &)
         end
 
-        def with_context(fields, &)
-          with_field(:context, fields, &)
+        def with_context(fields = nil, owned: false, **keyword_fields, &)
+          @fields.with(:context, fields, owned: owned, **keyword_fields, &)
         end
 
-        def with_carry(fields, &)
-          with_field(:carry, fields, &)
+        def with_carry(fields = nil, owned: false, **keyword_fields, &)
+          @fields.with(:carry, fields, owned: owned, **keyword_fields, &)
         end
 
         def without_carry(path, &)

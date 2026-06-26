@@ -242,9 +242,9 @@ module Julewire
           call_output_lifecycle_safely(method_name, timeout)
         end
 
-        def call_output_lifecycle_safely(method_name, _timeout)
-          # Collection owns the shared deadline; plain outputs expose no timeout API.
-          result = @output.public_send(method_name)
+        def call_output_lifecycle_safely(method_name, timeout)
+          # Sink.wrap centralizes timeout-aware lifecycle dispatch for every output.
+          result = @output.public_send(method_name, timeout: timeout)
           clear_degradation if method_name == :flush && result != false
           result
         rescue StandardError => e

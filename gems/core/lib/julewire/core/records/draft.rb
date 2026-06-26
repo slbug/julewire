@@ -90,10 +90,11 @@ module Julewire
           public
 
           def from_normalized_hash(data, lineage: nil, freeze_sections: true)
-            normalized = Fields::FieldSet.deep_symbolize_keys(data)
+            Record.validate_normalized_hash!(data)
+            normalized = data.dup
             lineage ||= Execution::Lineage.from_execution_hash(normalized[:execution])
-            normalized[:execution] = Execution::Lineage.clean_lazy_relationship_hash(normalized[:execution])
-            normalized = Fields::Internal.frozen_deep_symbolize_keys(normalized) if freeze_sections
+            normalized[:execution] = Execution::Lineage.clean_normalized_lazy_relationship_hash(normalized[:execution])
+            normalized = Fields::Internal.frozen_owned_copy(normalized) if freeze_sections
             new(
               normalized,
               lineage: lineage,
@@ -182,7 +183,7 @@ module Julewire
 
         def each_key(&) = @data.each_key(&)
 
-        def to_h = Fields::FieldSet.deep_dup(@data)
+        def to_h = Fields::FieldSet.deep_dup_owned(@data)
 
         def transform_field!(key)
           key = Fields::Internal.normalize_key(key)
@@ -236,7 +237,7 @@ module Julewire
         end
 
         def ensure_mutable_data!
-          @data = Fields::FieldSet.deep_dup(@data) if @data.frozen?
+          @data = Fields::FieldSet.deep_dup_owned(@data) if @data.frozen?
         end
 
         def transformed_field_lineage(key, value)
@@ -553,7 +554,12 @@ module Julewire
           def normalized_hash(value)
             return empty_hash if value.is_a?(Hash) && value.empty?
 
-            return value if @input_owned && !@freeze_sections && value.is_a?(Hash)
+            if @input_owned
+              return Fields::Internal.frozen_deep_symbolize_owned_keys(value) if @freeze_sections
+              return value if value.is_a?(Hash)
+
+              return Fields::FieldSet.deep_symbolize_owned_keys(value)
+            end
             return Fields::Internal.frozen_deep_symbolize_keys(value) if @freeze_sections
 
             Fields::FieldSet.deep_symbolize_keys(value)

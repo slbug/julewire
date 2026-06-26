@@ -55,8 +55,8 @@ module Julewire
           @stacks.delete(section, path)
         end
 
-        def with(section, fields, owned: false, &)
-          @stacks.with(section, fields, owned: owned, &)
+        def with(section, fields = nil, owned: false, **keyword_fields, &)
+          @stacks.with(section, fields, owned: owned, **keyword_fields, &)
         end
 
         def without(section, path, &)

@@ -32,17 +32,19 @@ module Julewire
           end
 
           def deep_dup(value)
-            return {} if value.is_a?(Hash) && value.empty?
-            return [] if value.is_a?(Array) && value.empty?
+            deep_dup_with(value, preserve_truncation_metadata: false)
+          end
 
-            Serialization::ValueCopy.call(value)
+          def deep_dup_owned(value)
+            deep_dup_with(value, preserve_truncation_metadata: true)
           end
 
           def deep_symbolize_keys(value)
-            return {} if value.is_a?(Hash) && value.empty?
-            return [] if value.is_a?(Array) && value.empty?
+            deep_symbolize_keys_with(value, preserve_truncation_metadata: false)
+          end
 
-            Serialization::ValueCopy.call(value, symbolize_keys: true)
+          def deep_symbolize_owned_keys(value)
+            deep_symbolize_keys_with(value, preserve_truncation_metadata: true)
           end
 
           def frozen_copy(value)
@@ -59,6 +61,30 @@ module Julewire
           end
 
           private
+
+          def deep_dup_with(value, preserve_truncation_metadata:)
+            return {} if value.is_a?(Hash) && value.empty?
+            return [] if value.is_a?(Array) && value.empty?
+
+            Serialization::ValueCopy.call(
+              value,
+              preserve_truncation_metadata: preserve_truncation_metadata
+            )
+          end
+
+          def deep_symbolize_keys_with(value, preserve_truncation_metadata:)
+            return {} if value.is_a?(Hash) && value.empty?
+            return [] if value.is_a?(Array) && value.empty?
+
+            Serialization::ValueCopy.call(
+              value,
+              max_array_items: Serialization::Serializer::DEFAULT_MAX_ARRAY_ITEMS,
+              max_hash_keys: Serialization::Serializer::DEFAULT_MAX_HASH_KEYS,
+              max_string_bytes: Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
+              preserve_truncation_metadata: preserve_truncation_metadata,
+              symbolize_keys: true
+            )
+          end
 
           def coerce_fields!(target, fields, invalid:)
             if fields.is_a?(Hash)

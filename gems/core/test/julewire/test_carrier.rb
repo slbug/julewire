@@ -67,6 +67,99 @@ module Julewire
       assert_empty Core::Propagation::Carrier.extract({ "julewire" => "[]" })
     end
 
+    def test_extract_result_reports_invalid_payload_status
+      assert_extract_failure_status("{", :malformed, extraction_error: true)
+    end
+
+    def test_extract_result_reports_non_hash_payload_status
+      assert_extract_failure_status("[1,2,3]", :non_hash, extraction_error: true)
+    end
+
+    def test_extract_ignores_oversized_payload_before_parsing
+      payload = JSON.generate("context" => { "request_id" => "request-1" })
+
+      assert_empty Core::Propagation::Carrier.extract({ "julewire" => payload }, max_bytes: payload.bytesize - 1)
+    end
+
+    def test_extract_defaults_to_carrier_byte_limit
+      payload = JSON.generate("context" => { "blob" => "x" * Core::Propagation::Carrier::DEFAULT_MAX_BYTES })
+
+      assert_empty Core::Propagation::Carrier.extract({ "julewire" => payload })
+    end
+
+    def test_extract_allows_explicit_unbounded_raw_payload_limit
+      payload = JSON.generate("context" => { "blob" => "x" * Core::Propagation::Carrier::DEFAULT_MAX_BYTES })
+
+      envelope = Core::Propagation::Carrier.extract({ "julewire" => payload }, max_bytes: nil)
+
+      assert_match(/\Ax+\.\.\.\[Truncated\]\z/, envelope.dig(:context, :blob))
+    end
+
+    def test_extract_accepts_payload_at_exact_max_bytes_limit
+      payload = JSON.generate("context" => { "request_id" => "request-1" })
+
+      envelope = Core::Propagation::Carrier.extract({ "julewire" => payload }, max_bytes: payload.bytesize)
+
+      assert_equal "request-1", envelope.dig(:context, :request_id)
+    end
+
+    def test_extract_result_reports_oversized_payload_status
+      payload = JSON.generate("context" => { "request_id" => "request-1" })
+
+      assert_extract_failure_status(payload, :oversized, max_bytes: payload.bytesize - 1)
+    end
+
+    def test_restore_ignores_oversized_payload
+      payload = JSON.generate("context" => { "request_id" => "request-1" })
+      carrier = { "julewire" => payload }
+
+      observed = Core::Propagation::Carrier.restore(carrier, max_bytes: payload.bytesize - 1) do
+        Julewire.context.to_h
+      end
+
+      assert_empty observed
+    end
+
+    def test_restore_defaults_to_carrier_byte_limit
+      payload = JSON.generate("context" => { "blob" => "x" * Core::Propagation::Carrier::DEFAULT_MAX_BYTES })
+      carrier = { "julewire" => payload }
+
+      observed = Core::Propagation::Carrier.restore(carrier) { Julewire.context.to_h }
+
+      assert_empty observed
+    end
+
+    def test_restore_accepts_payload_at_exact_max_bytes_limit
+      payload = JSON.generate("context" => { "request_id" => "request-1" })
+      carrier = { "julewire" => payload }
+
+      observed = Core::Propagation::Carrier.restore(carrier, max_bytes: payload.bytesize) do
+        Julewire.context.to_h
+      end
+
+      assert_equal({ request_id: "request-1" }, observed)
+    end
+
+    def test_restore_preserves_julewire_truncation_metadata
+      encoded = Core::Propagation::Carrier.encode(envelope: { context: { blob: "x" * 20_000 } })
+      carrier = { "julewire" => encoded }
+
+      observed = Core::Propagation::Carrier.restore(carrier) { Julewire.context.to_h }
+
+      assert_match(/\Ax+\.\.\.\[Truncated\]\z/, observed.fetch(:blob))
+      assert_symbol_truncation_metadata observed.fetch(:_julewire_truncation),
+                                        fields: ["blob"],
+                                        max_string_bytes: Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES
+    end
+
+    def test_extract_validates_max_bytes
+      error = assert_raises(ArgumentError) do
+        Core::Propagation::Carrier.extract({}, max_bytes: 0)
+      end
+
+      assert_equal "max_bytes must be nil or a positive Integer", error.message
+    end
+
     def test_inject_accepts_custom_key
       carrier = Core::Propagation::Carrier.inject({}, envelope: { context: { id: "1" } }, key: "x-julewire")
       payload = JSON.parse(carrier.fetch("x-julewire"))
@@ -193,6 +286,17 @@ module Julewire
     end
 
     private
+
+    def assert_extract_failure_status(payload, status, max_bytes: nil, extraction_error: false)
+      options = {}
+      options[:max_bytes] = max_bytes if max_bytes
+      result = Core::Propagation::Carrier.extract_result({ "julewire" => payload }, **options)
+
+      assert_empty result.envelope
+      assert_predicate result, :failure?
+      assert_equal status, result.status
+      assert_instance_of Core::Propagation::Carrier::ExtractionError, result.error if extraction_error
+    end
 
     def assert_inject_clears_stale_values(carrier)
       result = Core::Propagation::Carrier.inject(carrier, envelope: { context: { id: "1234567890" } }, max_bytes: 10)

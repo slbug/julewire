@@ -241,9 +241,9 @@ Julewire::Core::Propagation.restore(envelope, link_executions: true) do
 end
 ```
 
-Restoring an envelope is an explicit trust decision. Core validates shape, and
-outbound injection can enforce a byte limit, but core does not authenticate who
-wrote the carrier. At untrusted boundaries, extract only the carrier fields you
+Restoring an envelope is an explicit trust decision. Core validates shape and
+caps inbound carrier bytes by default, but core does not authenticate who wrote
+the carrier. At untrusted boundaries, extract only the carrier fields you
 intentionally accept, apply any application spoofing/filter policy first, then
 call `Carrier.restore` on that filtered carrier map.
 
@@ -269,7 +269,9 @@ Julewire::Core::Propagation::Carrier.restore(trusted) do
 end
 ```
 
-Use `max_bytes:` when the carrier target has practical size constraints:
+Inbound extraction and restore default to `Carrier::DEFAULT_MAX_BYTES`; pass
+`max_bytes: nil` only for a trusted unbounded carrier. Use `max_bytes:` on
+injection when the carrier target has stricter size constraints:
 
 ```ruby
 headers = Julewire::Core::Propagation::Carrier.inject({}, max_bytes: 8 * 1024)

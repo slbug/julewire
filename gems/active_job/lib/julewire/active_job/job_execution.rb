@@ -10,12 +10,31 @@ module Julewire
           carrier = carrier_for(job)
           return perform_job(job, configuration, &) unless configuration.propagation?
 
-          Julewire::Core::Propagation::Carrier.restore(carrier, key: configuration.carrier_key) do
+          result = Julewire::Core::Propagation::Carrier.extract_result(
+            carrier,
+            key: configuration.carrier_key,
+            max_bytes: configuration.carrier_max_bytes
+          )
+          record_carrier_restore_failure(result)
+
+          Julewire::Core::Propagation.restore(result.envelope, owned: true) do
             perform_job(job, configuration, &)
           end
         end
 
         private
+
+        def record_carrier_restore_failure(result)
+          return unless result.failure?
+
+          IntegrationHealth.record_failure(
+            result.error,
+            action: :carrier_restore,
+            component: :job_execution,
+            status: result.status,
+            reason: result.reason
+          )
+        end
 
         def perform_job(job, configuration, &)
           fields = job_fields(job)

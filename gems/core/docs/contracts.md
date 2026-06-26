@@ -190,7 +190,8 @@ different Ruby isolation boundary:
 - `Julewire::Core::Execution::ScopeSnapshot` for detached execution scope transfer.
 - Parent-runtime hooks: `emit_envelope`, `emit_summary_record`, and `flush`.
   `emit_envelope` accepts detached input, context, carry, attributes, neutral,
-  scope snapshot, and an `enforce_level:` flag.
+  scope snapshot, `enforce_level:`, and `owned:`. Bridges pass `owned: true`
+  only for envelopes that came from Julewire's own wire format.
 
 Bridge runtimes may expose `emit_without_level` when integration code inside
 the bridge has already applied its own level gate. Parent runtime labels,

@@ -36,6 +36,20 @@ module Julewire
       end
     end
 
+    class TimeoutAwareOutput
+      attr_reader :close_timeout, :flush_timeout
+
+      def write(_value); end
+
+      def flush(timeout: nil)
+        @flush_timeout = timeout
+      end
+
+      def close(timeout: nil)
+        @close_timeout = timeout
+      end
+    end
+
     class FailingLifecycleOutput
       def write(_value); end
 
@@ -80,6 +94,33 @@ module Julewire
 
     class WriteOnlyOutput
       def write(_value); end
+    end
+
+    class BlockingWriteOutput
+      WAIT_TIMEOUT = 1
+
+      attr_reader :flush_count, :write_started
+
+      def initialize
+        @flush_count = 0
+        @write_started = Queue.new
+        @flush_started = Queue.new
+        @release_write = Queue.new
+      end
+
+      def write(_value)
+        @write_started << true
+        @release_write.pop
+      end
+
+      def flush
+        @flush_count += 1
+        @flush_started << true
+      end
+
+      def release_write = @release_write << true
+
+      def wait_for_flush = @flush_started.pop(timeout: WAIT_TIMEOUT)
     end
 
     class ForkAwareOutput < WriteOnlyOutput
@@ -133,6 +174,40 @@ module Julewire
       assert_equal 0, output.flush_count
       assert pipeline.flush
       assert_equal 1, output.flush_count
+    end
+
+    def test_pipeline_forwards_lifecycle_timeout_to_timeout_aware_output
+      output = TimeoutAwareOutput.new
+      pipeline = build_pipeline(output: output)
+
+      assert pipeline.flush(timeout: 0.25)
+
+      assert_in_delta 0.25, output.flush_timeout, 0.01
+    end
+
+    def test_synchronized_output_forwards_close_timeout_to_timeout_aware_owned_output
+      output = TimeoutAwareOutput.new
+      synchronized = Julewire::Core::Destinations::SynchronizedOutput.new(output, close_output: true)
+
+      assert synchronized.close(timeout: 0.5)
+
+      assert_in_delta 0.5, output.close_timeout
+    end
+
+    def test_synchronized_output_lifecycle_does_not_wait_for_write_mutex
+      raw_output = BlockingWriteOutput.new
+      output = Julewire::Core::Destinations::SynchronizedOutput.new(raw_output)
+      writer = Thread.new { output.write("held") }
+
+      assert raw_output.write_started.pop(timeout: TEST_THREAD_TIMEOUT)
+      flusher = Thread.new { output.flush }
+
+      assert raw_output.wait_for_flush
+      assert_equal 1, raw_output.flush_count
+    ensure
+      raw_output&.release_write
+      writer&.join(TEST_THREAD_TIMEOUT)
+      flusher&.join(TEST_THREAD_TIMEOUT)
     end
 
     def test_pipeline_close_flushes_caller_owned_output

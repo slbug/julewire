@@ -17,7 +17,7 @@ apps pass a `Configuration` instance to `install!`.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `carrier_max_bytes` | `nil` | Omit oversized carriers from serialized jobs. |
+| `carrier_max_bytes` | `65_536` | Omit oversized carriers from serialized jobs. |
 | `silence_log_subscriber` | `true` | Detach Active Job default text subscriber output. |
 
 Example:

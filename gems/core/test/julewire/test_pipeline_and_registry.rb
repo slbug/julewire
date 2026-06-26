@@ -577,7 +577,7 @@ module Julewire
 
   class TestPipelineLifecycle < Minitest::Test
     class ArgumentErrorFlushOutput < Core::Destinations::SynchronizedOutput
-      attr_reader :calls
+      attr_reader :calls, :flush_timeout
 
       def initialize
         super(StringIO.new)
@@ -586,6 +586,7 @@ module Julewire
 
       def flush(timeout: nil)
         @calls += 1
+        @flush_timeout = timeout
         raise ArgumentError, "bad flush #{timeout.inspect}"
       end
     end
@@ -613,7 +614,8 @@ module Julewire
       refute pipeline.flush(timeout: 0.25)
 
       assert_equal 1, output.calls
-      assert_equal "bad flush nil", failures.pop.message
+      assert_in_delta 0.25, output.flush_timeout
+      assert_match(/\Abad flush /, failures.pop.message)
     end
   end
 end

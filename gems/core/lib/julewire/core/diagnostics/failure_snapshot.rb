@@ -16,7 +16,9 @@ module Julewire
               integration: metadata[:integration],
               output_class: metadata[:output_class],
               phase: metadata[:phase],
-              record: record_metadata(metadata[:record_metadata])
+              reason: metadata[:reason],
+              record: record_metadata(metadata[:record_metadata]),
+              status: metadata[:status]
             }.compact.freeze
           end
 

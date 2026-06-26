@@ -111,14 +111,36 @@ module Julewire
     end
   end
 
+  module RactorRecordHelper
+    def record(message:, payload: {})
+      Julewire::Core::Records::Draft.build(
+        { message: message, payload: payload },
+        context: {},
+        scope: nil
+      ).to_record
+    end
+  end
+
+  module RactorWaitHelper
+    def wait_until
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
+      until yield
+        flunk "condition did not become true" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        Thread.pass
+      end
+    end
+  end
+
   class SlowRactorPortOutput
-    def initialize(write_port)
+    def initialize(write_port, sleep_seconds: 0.5)
       @write_port = write_port
+      @sleep_seconds = sleep_seconds
     end
 
     def write(value) # rubocop:disable Naming/PredicateMethod -- Output protocol uses truthy write results.
       @write_port.send(value)
-      sleep 0.5
+      sleep @sleep_seconds
       true
     end
   end
@@ -497,6 +519,8 @@ module Julewire
 
   class TestRactorDestination < Minitest::Test
     include DroppingRactorDestinationHelper
+    include RactorRecordHelper
+    include RactorWaitHelper
 
     def test_ractor_destination_formats_encodes_and_writes_in_worker
       port = ::Ractor::Port.new
@@ -661,28 +685,98 @@ module Julewire
       assert_raises(ArgumentError) { Julewire::Ractor::Destination.new(output: Object.new, name: Object.new) }
       assert_raises(ArgumentError) { Julewire::Ractor::Destination.new(output: Object.new, name: :"") }
     end
+  end
+
+  class TestRactorDestinationConcurrentQueue < Minitest::Test
+    include RactorRecordHelper
+    include RactorWaitHelper
+
+    def test_ractor_destination_reserves_queue_slots_across_concurrent_emitters
+      accepted, dropped = exercise_concurrent_queue
+
+      assert_includes %w[concurrent-0 concurrent-1], accepted
+      assert_equal [:queue_full_dropped], dropped
+      assert_equal 2, Array(accepted).size + dropped.size
+    end
+
+    def test_ractor_destination_queue_reservation_stress
+      8.times do
+        accepted, dropped = exercise_concurrent_queue(sleep_seconds: 0.02)
+
+        assert_includes %w[concurrent-0 concurrent-1], accepted
+        assert_equal [:queue_full_dropped], dropped
+        assert_equal 2, Array(accepted).size + dropped.size
+      end
+    end
+
+    def test_ractor_destination_unbounded_queue_ack_does_not_count_slot_underflow
+      port = ::Ractor::Port.new
+      destination = Julewire::Ractor::Destination.new(output: RactorPortOutput.new(port), max_queue: 0)
+
+      destination.emit(record(message: "unbounded"))
+
+      assert destination.flush(timeout: 1)
+      messages = [port.receive, port.receive]
+
+      assert_equal "unbounded", JSON.parse(messages.find { it.is_a?(String) }).fetch("message")
+      wait_until { destination.health.dig(:counts, :worker_accepted) == 1 }
+      health = destination.health
+
+      assert_equal 0, health.fetch(:in_flight)
+      assert_equal 0, health.dig(:counts, :slot_underflow_ignored)
+    ensure
+      destination&.close(timeout: 1)
+      Julewire::Ractor::PortLifecycle.close(port) if port
+    end
 
     private
 
-    def record(message:, payload: {})
-      Julewire::Core::Records::Draft.build(
-        { message: message, payload: payload },
-        context: {},
-        scope: nil
-      ).to_record
+    def concurrent_queue_destination(sleep_seconds:)
+      write_port = ::Ractor::Port.new
+      drops = Queue.new
+      destination = Julewire::Ractor::Destination.new(
+        output: SlowRactorPortOutput.new(write_port, sleep_seconds: sleep_seconds),
+        max_queue: 1,
+        request_timeout: 0.01,
+        on_drop: ->(reason, _metadata) { drops << reason }
+      )
+      [write_port, drops, destination]
     end
 
-    def wait_until
-      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
-      until yield
-        flunk "condition did not become true" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-
-        Thread.pass
+    def start_concurrent_emitters(destination)
+      ready = Queue.new
+      start = Queue.new
+      threads = Array.new(2) do |index|
+        Thread.new do
+          ready << true
+          start.pop
+          destination.emit(record(message: "concurrent-#{index}"))
+        end
       end
+      2.times { ready.pop }
+      2.times { start << true }
+      threads.each(&:join)
+      threads
+    end
+
+    def exercise_concurrent_queue(sleep_seconds: 0.5)
+      write_port, drops, destination = concurrent_queue_destination(sleep_seconds: sleep_seconds)
+      threads = start_concurrent_emitters(destination)
+      accepted = JSON.parse(write_port.receive).fetch("message")
+
+      assert_equal 1, destination.health.dig(:counts, :queue_full_dropped)
+
+      [accepted, nonblocking_queue_values(drops)]
+    ensure
+      threads&.each { |thread| thread.join(1) || thread.kill }
+      destination&.close(timeout: 1)
+      Julewire::Ractor::PortLifecycle.close(write_port) if write_port
     end
   end
 
   class TestRactorDestinationFanout < Minitest::Test
+    include RactorRecordHelper
+
     class DestinationProbe
       attr_reader :emitted, :forks, :health_calls, :name
 
@@ -763,13 +857,13 @@ module Julewire
         destinations: [bad, good],
         on_failure: ->(error, **metadata) { failures << [error.class, metadata] }
       )
-      record = build_record(message: "fanout")
+      fanout_record = record(message: "fanout")
 
-      assert_nil fanout.emit(record)
+      assert_nil fanout.emit(fanout_record)
 
       health = fanout.health
 
-      assert_equal [record], good.emitted
+      assert_equal [fanout_record], good.emitted
       assert_equal :degraded, health.fetch(:status)
       assert_equal :emit, health.dig(:last_failure, :action)
       assert_equal :bad, health.dig(:last_failure, :destination)
@@ -777,7 +871,7 @@ module Julewire
     end
 
     def test_ractor_fanout_contains_chaos_failures
-      record = build_record(message: "fanout-chaos")
+      fanout_record = record(message: "fanout-chaos")
 
       Julewire::Testing::Chaos.assert_contained(self) do |error|
         bad = DestinationProbe.new(name: :bad, emit_error: error)
@@ -786,7 +880,7 @@ module Julewire
           on_failure: Julewire::Testing::Chaos.raiser(error)
         )
 
-        fanout.emit(record)
+        fanout.emit(fanout_record)
       end
     end
 
@@ -824,10 +918,6 @@ module Julewire
 
     private
 
-    def build_record(message:)
-      Julewire::Core::Records::Draft.build({ message: message }, context: {}, scope: nil).to_record
-    end
-
     def port_record(port)
       messages = [port.receive, port.receive]
       JSON.parse(messages.find { it.is_a?(String) })
@@ -836,14 +926,16 @@ module Julewire
 
   class TestRactorDestinationSendError < Minitest::Test
     include DroppingRactorDestinationHelper
+    include RactorRecordHelper
 
     def test_ractor_destination_drops_non_copyable_record_payload_values
       port, drops, destination = dropping_ractor_destination
 
-      destination.emit(record(payload: { callback: proc {} }))
+      destination.emit(record(message: "bad", payload: { callback: proc {} }))
       health = destination.health
 
       assert_equal 1, health.dig(:counts, :send_error)
+      assert_equal 0, health.fetch(:in_flight)
       assert_equal :send_error, health.dig(:last_loss, :reason)
       assert_equal :degraded, health.fetch(:status)
       assert_equal [:send_error], nonblocking_queue_values(drops)
@@ -851,24 +943,15 @@ module Julewire
       destination&.close(timeout: 1)
       Julewire::Ractor::PortLifecycle.close(port) if port
     end
-
-    private
-
-    def record(payload:)
-      Julewire::Core::Records::Draft.build(
-        { message: "bad", payload: payload },
-        context: {},
-        scope: nil
-      ).to_record
-    end
   end
 
   class TestRactorBridge < Minitest::Test # rubocop:disable Metrics/ClassLength -- Bridge dispatch matrix.
     def test_ractor_bridge_dispatches_remote_emit_requests
       runtime = Object.new
       received = []
-      runtime.define_singleton_method(:emit_envelope) do |input:, context:, carry:, attributes:, neutral:, scope:|
-        received << [input, context, carry, attributes, neutral, scope]
+      runtime.define_singleton_method(:emit_envelope) do |input:, context:, carry:, attributes:, neutral:, scope:,
+                                                          owned: false|
+        received << [input, context, carry, attributes, neutral, scope, owned]
         "formatted"
       end
 
@@ -879,23 +962,15 @@ module Julewire
       )
 
       assert_equal "formatted", result
-      input, context, carry, attributes, neutral, scope = received.fetch(0)
-
-      assert_equal remote_emit_arguments[0], input
-      assert_equal remote_emit_arguments[1], context
-      assert_equal remote_emit_arguments[2], carry
-      assert_equal remote_emit_arguments[3], attributes
-      assert_equal remote_emit_arguments[4], neutral
-      assert_instance_of Julewire::Core::Execution::ScopeSnapshot, scope
-      assert_empty scope.execution_hash
+      assert_remote_emit_dispatch(received.fetch(0))
     end
 
     def test_ractor_bridge_dispatches_remote_emit_without_level_requests
       runtime = Object.new
       received = []
       runtime.define_singleton_method(:emit_envelope) do |input:, context:, carry:, attributes:, neutral:, scope:,
-                                                          enforce_level: true|
-        received << [input, context, carry, attributes, neutral, scope, enforce_level]
+                                                          enforce_level: true, owned: false|
+        received << [input, context, carry, attributes, neutral, scope, enforce_level, owned]
       end
 
       Julewire::Ractor::Bridge.__send__(
@@ -905,6 +980,7 @@ module Julewire
       )
 
       refute received.fetch(0).fetch(6)
+      assert received.fetch(0).fetch(7)
     end
 
     def test_runtime_dispatches_remote_emit_without_level_below_parent_threshold
@@ -925,6 +1001,19 @@ module Julewire
       )
 
       assert_equal "debug", JSON.parse(output.string).fetch("message")
+    end
+
+    def assert_remote_emit_dispatch(received)
+      input, context, carry, attributes, neutral, scope, owned = received
+
+      assert_equal remote_emit_arguments[0], input
+      assert_equal remote_emit_arguments[1], context
+      assert_equal remote_emit_arguments[2], carry
+      assert_equal remote_emit_arguments[3], attributes
+      assert_equal remote_emit_arguments[4], neutral
+      assert owned
+      assert_instance_of Julewire::Core::Execution::ScopeSnapshot, scope
+      assert_empty scope.execution_hash
     end
 
     def test_ractor_bridge_dispatches_summary_records

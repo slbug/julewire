@@ -43,25 +43,48 @@ module Julewire
 
     def test_job_execution_skips_carrier_restore_when_propagation_is_disabled
       records = capture_records
-      carrier = nil
-
-      Julewire.context.with(request_id: "request-1") do
-        carrier = Julewire::Core::Propagation::Carrier.inject({})
-      end
+      carrier = carrier_with_request_context
 
       configuration = Julewire::ActiveJob::Configuration.new
       configuration.propagation = false
       job = fake_job
       job.instance_variable_set(:@julewire_carrier, carrier)
 
-      Julewire::ActiveJob::JobExecution.call(job, configuration: configuration) do
-        Julewire.emit(event: "job.point", source: "test")
-      end
+      emit_job_point(job, configuration)
 
-      point = records.find { it[:event] == "job.point" }
+      assert_job_point_without_restored_request(records)
+    end
 
-      refute point.fetch(:context).key?(:request_id)
-      assert_equal "job-1", point.dig(:context, :job_id)
+    def test_job_execution_skips_oversized_inbound_carrier_restore
+      records = capture_records
+      carrier = carrier_with_request_context
+
+      configuration = Julewire::ActiveJob::Configuration.new
+      configuration.carrier_max_bytes = carrier.fetch(configuration.carrier_key).bytesize - 1
+      job = fake_job
+      job.instance_variable_set(:@julewire_carrier, carrier)
+
+      emit_job_point(job, configuration)
+
+      assert_job_point_without_restored_request(records)
+      failure = Julewire.health.dig(:process_integrations, :active_job, :last_failure)
+
+      assert_equal :carrier_restore, failure.fetch(:action)
+      assert_equal :job_execution, failure.fetch(:component)
+      assert_equal :oversized, failure.fetch(:status)
+    end
+
+    def test_job_execution_restores_truncated_carrier_context
+      records = capture_records
+      job = fake_job
+      job.instance_variable_set(:@julewire_carrier, carrier_with_truncated_context)
+
+      emit_job_point(job, Julewire::ActiveJob::Configuration.new)
+
+      context = records.find { it[:event] == "job.point" }.fetch(:context)
+
+      assert_truncated_context(context)
+      assert_equal "job-1", context.fetch(:job_id)
     end
 
     def test_job_execution_records_error_summary_and_reraises
@@ -152,6 +175,43 @@ module Julewire
     end
 
     private
+
+    def carrier_with_request_context
+      Julewire.context.with(request_id: "request-1") do
+        Julewire::Core::Propagation::Carrier.inject({})
+      end
+    end
+
+    def carrier_with_truncated_context
+      {
+        "julewire" => Julewire::Core::Propagation::Carrier.encode(
+          envelope: { context: { blob: "x" * 20_000 } }
+        )
+      }
+    end
+
+    def assert_truncated_context(context)
+      assert_match(/\Ax+\.\.\.\[Truncated\]\z/, context.fetch(:blob))
+      metadata = context.fetch(:_julewire_truncation)
+
+      assert metadata.fetch(:truncated)
+      assert_equal ["blob"], metadata.fetch(:truncated_fields)
+      assert_equal Julewire::Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
+                   metadata.dig(:limits, :max_string_bytes)
+    end
+
+    def assert_job_point_without_restored_request(records)
+      point = records.find { it[:event] == "job.point" }
+
+      refute point.fetch(:context).key?(:request_id)
+      assert_equal "job-1", point.dig(:context, :job_id)
+    end
+
+    def emit_job_point(job, configuration)
+      Julewire::ActiveJob::JobExecution.call(job, configuration: configuration) do
+        Julewire.emit(event: "job.point", source: "test")
+      end
+    end
 
     def perform_fake_job(job, &)
       Julewire::ActiveJob::JobExecution.call(job, configuration: Julewire::ActiveJob::Configuration.new, &)

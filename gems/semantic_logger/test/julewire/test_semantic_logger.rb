@@ -91,5 +91,26 @@ module Julewire
       assert_equal :semantic_logger, drop_metadata.fetch(:destination)
       assert_equal :info, drop_metadata.dig(:record_metadata, :severity)
     end
+
+    def test_destination_callback_failures_are_reported_in_health
+      Julewire.configure do |config|
+        config.destinations.use(
+          :semantic_logger,
+          formatter: ->(_record) { raise "format failed" },
+          io: StringIO.new,
+          async: false,
+          on_drop: ->(*) { raise "drop callback failed" },
+          on_failure: ->(*) { raise "failure callback failed" }
+        )
+      end
+
+      Julewire.emit(message: "lost")
+
+      health = Julewire.health.dig(:pipeline, :destinations, :semantic_logger)
+
+      assert_equal 2, health.dig(:counts, :callback_error)
+      assert_equal "RuntimeError", health.dig(:last_callback_failure, :class)
+      assert_equal :semantic_logger, health.dig(:last_callback_failure, :destination)
+    end
   end
 end

@@ -10,7 +10,14 @@ module Julewire
           fields ||= PayloadReader.message_payload(message)
           carrier = carrier_for(fields, configuration)
 
-          Julewire::Core::Propagation::Carrier.restore(carrier, key: configuration.carrier_key) do
+          result = Julewire::Core::Propagation::Carrier.extract_result(
+            carrier,
+            key: configuration.carrier_key,
+            max_bytes: configuration.carrier_max_bytes
+          )
+          record_carrier_restore_failure(result)
+
+          Julewire::Core::Propagation.restore(result.envelope, owned: true) do
             Julewire::Core::Integration::Facade.with_neutral(message_neutral(fields)) do
               Julewire::Core::Integration::Facade.with_attributes(message_attributes(fields), &)
             end
@@ -18,6 +25,18 @@ module Julewire
         end
 
         private
+
+        def record_carrier_restore_failure(result)
+          return unless result.failure?
+
+          IntegrationHealth.record_failure(
+            result.error,
+            action: :carrier_restore,
+            component: :message_context,
+            status: result.status,
+            reason: result.reason
+          )
+        end
 
         def carrier_for(fields, configuration)
           return {} unless configuration.propagation?

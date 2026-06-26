@@ -80,22 +80,14 @@ module Julewire
         end
       end
 
-      def emit_envelope(input:, context:, scope:, carry: {}, attributes: {}, neutral: {}, enforce_level: true)
+      def emit_envelope(input:, context:, scope:, carry: {}, attributes: {}, neutral: {}, enforce_level: true,
+                        owned: false)
         reject_runtime_call_during_configure!(:emit_envelope)
         state = runtime_state
         return record_post_close_emit(state) if state.pipeline_closed
 
         begin
-          record = Records::Draft.build(
-            input,
-            context: envelope_hash(context),
-            attributes: envelope_hash(attributes),
-            neutral: envelope_hash(neutral),
-            carry: envelope_hash(carry),
-            scope: scope,
-            error_backtrace_lines: state.configuration.error_backtrace_lines,
-            invalid_severity_reporter: @invalid_severity_reporter
-          ).to_record
+          record = envelope_draft(input, context, attributes, neutral, carry, scope, state, owned: owned).to_record
           state.pipeline.emit_record(record, enforce_level: enforce_level)
         rescue StandardError => e
           notify_failure(e, state, action: :emit_envelope)
@@ -199,6 +191,33 @@ module Julewire
       end
 
       private
+
+      def envelope_draft(input, context, attributes, neutral, carry, scope, state, owned:)
+        if owned
+          Records::Draft.build_pipeline_owned(
+            input,
+            context: envelope_hash(context),
+            attributes: envelope_hash(attributes),
+            neutral: envelope_hash(neutral),
+            carry: envelope_hash(carry),
+            scope: scope,
+            error_backtrace_lines: state.configuration.error_backtrace_lines,
+            input_owned: true,
+            invalid_severity_reporter: @invalid_severity_reporter
+          )
+        else
+          Records::Draft.build(
+            input,
+            context: envelope_hash(context),
+            attributes: envelope_hash(attributes),
+            neutral: envelope_hash(neutral),
+            carry: envelope_hash(carry),
+            scope: scope,
+            error_backtrace_lines: state.configuration.error_backtrace_lines,
+            invalid_severity_reporter: @invalid_severity_reporter
+          )
+        end
+      end
 
       def before_execution_boundary_call!(action)
         reject_runtime_call_during_configure!(action)

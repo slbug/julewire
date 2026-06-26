@@ -78,6 +78,23 @@ module Julewire
       end
     end
 
+    def test_ractor_wrapper_preserves_owned_truncation_metadata
+      with_experimental_ractor_warnings_suppressed do
+        output = QueueingOutput.new
+        Julewire.configure { configure_direct_destination(it, output: output) }
+        encoded = Julewire::Core::Propagation::Carrier.encode(envelope: { context: { blob: "x" * 20_000 } })
+
+        Julewire::Core::Propagation::Carrier.restore({ "julewire" => encoded }) do
+          Julewire.ractor do
+            Julewire.emit(severity: :error, source: "app", event: "work", message: "done")
+          end.value
+        end
+
+        assert Julewire.flush(timeout: 1)
+        assert_truncated_context(JSON.parse(output.pop).fetch("context"))
+      end
+    end
+
     def test_ractor_wrapper_bridges_execution_summaries_to_parent_runtime
       with_experimental_ractor_warnings_suppressed do
         output = emit_ractor_summary
@@ -315,6 +332,16 @@ module Julewire
       assert_equal "ractor", record.dig("context", "worker")
       refute record.key?("carry")
       assert_equal 1, record.dig("payload", "processed")
+    end
+
+    def assert_truncated_context(context)
+      assert_match(/\Ax+\.\.\.\[Truncated\]\z/, context.fetch("blob"))
+      metadata = context.fetch("_julewire_truncation")
+
+      assert metadata.fetch("truncated")
+      assert_equal ["blob"], metadata.fetch("truncated_fields")
+      assert_equal Julewire::Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
+                   metadata.dig("limits", "max_string_bytes")
     end
   end
 end

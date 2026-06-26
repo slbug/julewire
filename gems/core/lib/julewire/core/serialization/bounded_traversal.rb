@@ -22,16 +22,13 @@ module Julewire
             max_hash_keys: DEFAULT_MAX_HASH_KEYS,
             max_string_bytes: DEFAULT_MAX_STRING_BYTES
           )
-            {
-              "truncated" => true,
-              "truncated_fields" => Array(fields).uniq,
-              "limits" => {
-                "max_array_items" => max_array_items,
-                "max_depth" => max_depth,
-                "max_hash_keys" => max_hash_keys,
-                "max_string_bytes" => max_string_bytes
-              }
-            }
+            TruncationMetadata.build(
+              fields,
+              max_array_items: max_array_items,
+              max_depth: max_depth,
+              max_hash_keys: max_hash_keys,
+              max_string_bytes: max_string_bytes
+            )
           end
         end
 
@@ -110,15 +107,17 @@ module Julewire
           fields = nil
           result = {}
           track_paths = @track_paths
+          visited = 0
           value.each do |raw_key, item|
-            if result.length >= @max_hash_keys
+            if visited >= @max_hash_keys
               fields = append_truncation_field(fields, "hash_keys")
               break
             end
 
+            visited += 1
             child = walk_value(item, depth + 1, raw_key, track_paths ? path_for(path, raw_key) : nil)
             child_truncated = consume_truncated
-            key = key_value(raw_key)
+            key = key_value(raw_key, depth, path)
             key_truncated = consume_truncated
             result[key] = child
             fields = record_hash_truncation(fields, raw_key, key, key_truncated, child_truncated)
@@ -130,19 +129,23 @@ module Julewire
           fields = nil
           result = {}
           track_paths = @track_paths
+          visited = 0
           value.each do |raw_key, item|
+            # The hash cap bounds visited input entries, not final output keys, so
+            # serialized-key collisions and compacted entries cannot hide work.
+            if visited >= @max_hash_keys
+              fields = append_truncation_field(fields, "hash_keys")
+              break
+            end
+
+            visited += 1
             next if raw_omitted_value?(item)
 
             child = walk_value(item, depth + 1, raw_key, track_paths ? path_for(path, raw_key) : nil)
             child_truncated = consume_truncated
             next if omitted_value?(child)
 
-            if result.length >= @max_hash_keys
-              fields = append_truncation_field(fields, "hash_keys")
-              break
-            end
-
-            key = key_value(raw_key)
+            key = key_value(raw_key, depth, path)
             key_truncated = consume_truncated
             result[key] = child
             fields = record_hash_truncation(fields, raw_key, key, key_truncated, child_truncated)
@@ -159,12 +162,14 @@ module Julewire
         def walk_full_array(value, depth, path)
           fields = nil
           result = []
+          visited = 0
           value.each do |item|
-            if result.length >= @max_array_items
+            if visited >= @max_array_items
               fields = append_truncation_field(fields, "array_items")
               break
             end
 
+            visited += 1
             child = walk_value(item, depth + 1, nil, path)
             child_truncated = consume_truncated
             result << child
@@ -176,17 +181,19 @@ module Julewire
         def walk_compact_array(value, depth, path)
           fields = nil
           result = []
+          visited = 0
           value.each do |item|
+            if visited >= @max_array_items
+              fields = append_truncation_field(fields, "array_items")
+              break
+            end
+
+            visited += 1
             next if raw_omitted_value?(item)
 
             child = walk_value(item, depth + 1, nil, path)
             child_truncated = consume_truncated
             next if omitted_value?(child)
-
-            if result.length >= @max_array_items
-              fields = append_truncation_field(fields, "array_items")
-              break
-            end
 
             result << child
             fields = append_truncation_field(fields, "array_items") if child_truncated
@@ -198,7 +205,7 @@ module Julewire
 
         def raw_omitted_value?(_value) = false
 
-        def key_value(key)
+        def key_value(key, _depth = nil, _path = nil)
           clear_truncated(key.is_a?(String) ? copy_string(key) : key)
         end
 
@@ -259,8 +266,7 @@ module Julewire
         end
 
         def append_truncation_field(fields, field)
-          (fields ||= []) << field
-          fields
+          TruncationMetadata.append_field(fields, field)
         end
 
         def path_for(parent_path, key)

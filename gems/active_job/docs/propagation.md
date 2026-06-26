@@ -7,9 +7,9 @@ job execution scope starts.
 That lets upstream context flow into the job without emitting propagation-only
 data by default.
 
-Set `carrier_max_bytes` to omit oversized carriers from serialized job payloads.
-When omitted, the job still runs normally; it starts without upstream Julewire
-context.
+`carrier_max_bytes` defaults to `65_536`. Oversized carriers are omitted from
+serialized job payloads and ignored on restore. The job still runs normally; it
+starts without upstream Julewire context.
 
 Generic job metadata such as class, id, queue, priority, execution count,
 timestamps, and status is emitted in the record's `neutral` section as `job.*`

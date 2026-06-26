@@ -72,6 +72,7 @@ module Julewire
         current_field_hash(:neutral)
       end
 
+      # SectionProxy dispatches these dynamically from the public field readers.
       def context_value(key, default:)
         current_field_stack(:context).value_for(key, default: default)
       end
@@ -139,21 +140,25 @@ module Julewire
         end
       end
 
-      def with_propagation(context: {}, carry: {}, execution: {}, link_executions: false, &)
+      def with_propagation(context: {}, carry: {}, execution: {}, link_executions: false, owned: false, &)
         scope = current_scope
-        execution = Fields::FieldSet.deep_symbolize_keys(execution)
+        execution = if owned
+                      Fields::FieldSet.deep_symbolize_owned_keys(execution)
+                    else
+                      Fields::FieldSet.deep_symbolize_keys(execution)
+                    end
         @execution_overlays.push(execution)
         @execution_lineage_overlays.push(link_executions ? Execution::Lineage.from_execution_hash(execution) : nil)
         invalidate_propagation_cache!
 
         begin
           if scope
-            scope.with_carry(carry) do
-              scope.with_context(context, &)
+            scope.with_carry(carry, owned: owned) do
+              scope.with_context(context, owned: owned, &)
             end
           else
-            @ambient_fields.with(:carry, carry) do
-              @ambient_fields.with(:context, context, &)
+            @ambient_fields.with(:carry, carry, owned: owned) do
+              @ambient_fields.with(:context, context, owned: owned, &)
             end
           end
         ensure

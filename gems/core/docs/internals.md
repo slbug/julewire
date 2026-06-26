@@ -97,11 +97,11 @@ own schedulers because worker ractors cannot share the main scheduler object.
 
 ## Remote Envelope Hook
 
-Core keeps `Runtime#emit_envelope(input:, context:, attributes:, carry:, neutral:, scope:, enforce_level:)`
+Core keeps `Runtime#emit_envelope(input:, context:, attributes:, carry:, neutral:, scope:, enforce_level:, owned:)`
 for bridge code. The bridge reconstructs the scope snapshot, and core rebuilds
 a normal record from input, context, attributes, carry, neutral, and that
-snapshot before emitting through the active pipeline. It is not a public
-application API.
+snapshot before emitting through the active pipeline. Bridges pass `owned: true`
+only for Julewire-owned wire data. It is not a public application API.
 
 ## Test Seams
 

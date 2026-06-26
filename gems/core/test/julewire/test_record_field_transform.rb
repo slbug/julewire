@@ -139,9 +139,9 @@ module Julewire
       assert_equal "abc...[Truncated]", result.fetch(:message)
       assert_equal "abc...[Truncated]", result.dig(:payload, :long)
       assert_nil result.dig(:payload, :other)
-      assert result.dig(:payload, :_julewire_truncation, "truncated")
+      assert result.dig(:payload, :_julewire_truncation, :truncated)
       assert_equal "abc...[Truncated]", result.dig(:attributes, :list, 0)
-      assert result.dig(:attributes, :list, 1, :_julewire_truncation, "truncated")
+      assert result.dig(:attributes, :list, 1, :_julewire_truncation, :truncated)
     end
 
     def test_applies_depth_bound
@@ -153,7 +153,7 @@ module Julewire
       result = transform.call(record) { Core::Serialization::BoundedTransform::CONTINUE }
 
       assert_equal "[MaxDepth]", result.dig(:context, :request, :id)
-      assert result.dig(:context, :_julewire_truncation, "truncated")
+      assert result.dig(:context, :_julewire_truncation, :truncated)
     end
 
     def test_accepts_hash_subclasses_for_container_fields

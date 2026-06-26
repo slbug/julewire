@@ -13,7 +13,8 @@ is unsupported. Call `Julewire.configure` again.
 User-supplied destination formatter, encoder, output, and processor instances
 are shared by reference. Processors, formatters, and encoders must be stateless
 or otherwise reentrant; core does not synchronize them. Direct outputs are
-wrapped with a per-destination mutex.
+wrapped with a per-destination write mutex; `flush` may overlap writes, while
+terminal `close` is serialized with writes.
 
 When a reconfigure reuses the same output or destination object, core keeps that
 resource open for the new active pipeline and skips teardown through the old

@@ -152,7 +152,7 @@ module Julewire
 
         def raw_omitted_value?(value) = DeepCompactEmpty.omitted?(value)
 
-        def key_value(key) = serialize_key(key)
+        def key_value(key, _depth = nil, _path = nil) = serialize_key(key)
 
         def error_value(error) = clear_truncated(unserializable_marker(error))
 

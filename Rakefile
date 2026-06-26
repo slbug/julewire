@@ -710,9 +710,6 @@ def assert_release_metadata
     [dir, nil]
   end
 
-  release_versions = versions.values.compact.uniq
-  failures << "gem versions differ: #{versions.inspect}" unless release_versions.one?
-
   GEM_DIRS.each { collect_release_metadata_failures(it, versions.fetch(it), failures) }
 
   return if failures.empty?

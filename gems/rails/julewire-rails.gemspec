@@ -35,9 +35,9 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "actionpack", ">= 8.1"
   spec.add_dependency "actionview", ">= 8.1"
-  spec.add_dependency "julewire-core", ">= 1.0"
-  spec.add_dependency "julewire-rack", ">= 1.0"
-  spec.add_dependency "julewire-rails_support", ">= 1.0"
+  spec.add_dependency "julewire-core", ">= 1.0.1"
+  spec.add_dependency "julewire-rack", ">= 1.0.1"
+  spec.add_dependency "julewire-rails_support", ">= 1.0.1"
   spec.add_dependency "logger", ">= 1.7"
   spec.add_dependency "railties", ">= 8.1"
   spec.add_dependency "zeitwerk", ">= 2.8.1"

@@ -181,8 +181,8 @@ Put redaction in processors or a separate policy gem before formatting.
 
 Truncated containers, containers pruned by `max_depth`, and circular container
 references get `_julewire_truncation` metadata. Serializer keys beginning with
-`_julewire_` are reserved by convention for core metadata; user payloads must
-not use that namespace. Public Julewire record contracts use symbol keys
+`_julewire_` are reserved for core metadata; public field ingress rejects the
+truncation marker as a user key. Public Julewire record contracts use symbol keys
 internally. Payloads should also use one JSON field name per value; mixed key
 types that stringify to the same JSON field are outside the serializer contract.
 Long strings use a `...[Truncated]` suffix. User data that already contains that

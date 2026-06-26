@@ -105,7 +105,7 @@ module Julewire
         envelope = Core::Propagation.capture_local
         Fiber.new(**) do |*args|
           with_cleared_configure_guard do
-            Core::Propagation.restore(envelope) { yield(*args) }
+            Core::Propagation.restore(envelope, owned: true) { yield(*args) }
           end
         end
       end
@@ -132,7 +132,7 @@ module Julewire
         envelope = Core::Propagation.capture_local
         Thread.new(*) do |*thread_args|
           with_cleared_configure_guard do
-            Core::Propagation.restore(envelope) { yield(*thread_args) }
+            Core::Propagation.restore(envelope, owned: true) { yield(*thread_args) }
           end
         end
       end

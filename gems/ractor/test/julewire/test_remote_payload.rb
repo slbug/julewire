@@ -70,15 +70,58 @@ module Julewire
 
     def test_accepts_hash_subclass_sections
       payload_hash = HashSubclass.new
-      payload_hash["input"] = "done"
+      input = HashSubclass.new
+      input["message"] = "done"
+      payload_hash["input"] = input
       context = HashSubclass.new
       context["request_id"] = "r1"
       payload_hash[:context] = context
 
       payload = Julewire::Ractor::RemotePayload.extract(payload_hash)
 
-      assert_equal "done", payload.fetch(:input)
+      assert_equal({ message: "done" }, payload.fetch(:input))
       assert_equal({ request_id: "r1" }, payload.fetch(:context))
+    end
+
+    def test_extract_normalizes_hash_input_as_owned_bridge_payload
+      payload = Julewire::Ractor::RemotePayload.extract(
+        "input" => {
+          "message" => "done",
+          "_julewire_truncation" => {
+            "truncated" => true,
+            "truncated_fields" => ["message"],
+            "limits" => { "max_string_bytes" => 16 }
+          }
+        }
+      )
+
+      assert_equal "done", payload.dig(:input, :message)
+      assert_equal ["message"], payload.dig(:input, :_julewire_truncation, :truncated_fields)
+    end
+
+    def test_extract_preserves_scalar_input_without_field_bag_normalization
+      message = ("x" * (Julewire::Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES + 1)).freeze
+      payload = Julewire::Ractor::RemotePayload.extract("input" => message)
+
+      assert_same message, payload.fetch(:input)
+    end
+
+    def test_extract_preserves_owned_truncation_metadata
+      payload = Julewire::Ractor::RemotePayload.extract(
+        "context" => {
+          "_julewire_truncation" => {
+            "truncated" => true,
+            "truncated_fields" => ["blob"],
+            "limits" => { "max_string_bytes" => 16_384 }
+          }
+        }
+      )
+
+      metadata = payload.dig(:context, :_julewire_truncation)
+
+      assert metadata.fetch(:truncated)
+      assert_equal ["blob"], metadata.fetch(:truncated_fields)
+      assert_equal 16_384, metadata.dig(:limits, :max_string_bytes)
     end
   end
 end

@@ -14,7 +14,8 @@ module Julewire
         @on_failure = validate_optional_callback(on_failure, name: :on_failure)
         @transport = transport || Transport.new(**transport_options)
         @health = Core::Integration::DestinationHealth.new(
-          counter_keys: %i[received formatted written failed],
+          callback_failure_counter: :callback_error,
+          counter_keys: %i[received formatted written failed callback_error],
           failure_counter: :failed
         )
       end
@@ -98,11 +99,16 @@ module Julewire
       end
 
       def notify_failure(error, **metadata)
-        Core::Diagnostics::CallbackNotifier.call(@on_failure, error, { destination: name }.merge(metadata))
+        callback_result = Core::Diagnostics::CallbackNotifier.call(
+          @on_failure,
+          error,
+          { destination: name }.merge(metadata)
+        )
+        record_callback_error(callback_result) if Core::Diagnostics::CallbackNotifier.failure?(callback_result)
       end
 
       def record_drop(reason, record)
-        Core::Diagnostics::CallbackNotifier.call(
+        callback_result = Core::Diagnostics::CallbackNotifier.call(
           @on_drop,
           reason,
           {
@@ -112,6 +118,11 @@ module Julewire
             record_metadata: record_metadata(record)
           }
         )
+        record_callback_error(callback_result) if Core::Diagnostics::CallbackNotifier.failure?(callback_result)
+      end
+
+      def record_callback_error(callback_failure)
+        @health.record_callback_failure(callback_failure)
       end
 
       def record_metadata(record)
