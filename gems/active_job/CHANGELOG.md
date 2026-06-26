@@ -2,7 +2,7 @@
 
 ## 1.0.1 - 2026-06-25
 
-- Default propagation carrier byte limits to 65 KiB and record health when
+- Default propagation carrier byte limits to 64 KiB and record health when
   oversized or malformed job carriers are ignored on restore.
 - Require julewire 1.0.1 internal gems.
 

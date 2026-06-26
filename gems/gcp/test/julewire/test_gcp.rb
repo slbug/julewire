@@ -761,6 +761,17 @@ module Julewire
       )
     end
 
+    def test_source_location_helper_parses_non_ascii_backtrace_path
+      assert_equal(
+        { "file" => "/tmp/é/job.rb", "line" => "9" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/é/job.rb:9")
+      )
+      assert_equal(
+        { "file" => "/tmp/é/job.rb", "line" => "9", "function" => "perform" },
+        GCP::SourceLocation.from_backtrace_line("/tmp/é/job.rb:9:in `perform'")
+      )
+    end
+
     def test_source_location_helper_rejects_backtrace_without_file
       assert_nil GCP::SourceLocation.from_backtrace_line(":9:in `perform'")
     end
@@ -1165,7 +1176,7 @@ module Julewire
       }
     end
 
-    def legacy_trace_payload
+    def cloud_trace_payload
       {
         request_headers: {
           "x-cloud-trace-context" => "06796866738c859f2f19b7cfb3214824/74;o=1"
@@ -1308,7 +1319,7 @@ module Julewire
     cover Julewire::GCP::TraceContext::Traceparent
 
     def test_parses_x_cloud_trace_context_when_traceparent_is_missing
-      record = normalized_record(payload: legacy_trace_payload)
+      record = normalized_record(payload: cloud_trace_payload)
 
       formatted = formatted_record(record, formatter: GCP::Formatter.new(project_id: "project-1"))
 

@@ -52,23 +52,23 @@ module Julewire
 
         def destination_info(destinations)
           destinations.transform_values do |destination|
-            {
-              counts: destination[:counts],
-              last_failure: destination[:last_failure],
-              last_loss: destination[:last_loss],
-              status: destination[:status]
-            }.compact
+            component_info(destination, include_loss: true)
           end
         end
 
         def integration_info(integrations)
           integrations.transform_values do |integration|
-            {
-              counts: integration[:counts],
-              last_failure: integration[:last_failure],
-              status: integration[:status]
-            }.compact
+            component_info(integration)
           end
+        end
+
+        def component_info(component, include_loss: false)
+          {
+            counts: component[:counts],
+            last_failure: component[:last_failure],
+            last_loss: include_loss ? component[:last_loss] : nil,
+            status: component[:status]
+          }.compact
         end
 
         def warnings(health)

@@ -31,8 +31,8 @@ module Julewire
           line = line.to_s
           index = line.rindex(FUNCTION_SEPARATOR)
           if index
-            location = line.byteslice(0, index)
-            function = line.byteslice(index + FUNCTION_SEPARATOR.bytesize, line.bytesize)
+            location = line[0, index]
+            function = line[(index + FUNCTION_SEPARATOR.length)..]
           else
             location = line
             function = nil
@@ -62,8 +62,8 @@ module Julewire
           index = location.rindex(":")
           return unless index
 
-          file = location.byteslice(0, index)
-          line = location.byteslice(index + 1, location.bytesize)
+          file = location[0, index]
+          line = location[(index + 1)..]
           return if file.empty? || !line.match?(/\A\d+\z/)
 
           [file, line]
@@ -72,8 +72,8 @@ module Julewire
         def normalize_function(function)
           return unless function
 
-          if function.bytesize >= 2 && quoted?(function.getbyte(0)) && quoted?(function.getbyte(-1))
-            function.byteslice(1, function.bytesize - 2)
+          if function.length >= 2 && quoted?(function.getbyte(0)) && quoted?(function.getbyte(-1))
+            function[1...-1]
           else
             function
           end
