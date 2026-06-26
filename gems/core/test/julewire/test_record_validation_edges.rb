@@ -114,6 +114,17 @@ module Julewire
       assert_equal({ class: "RuntimeError" }, record.fetch(:error))
     end
 
+    def test_record_from_normalized_hash_preserves_owned_truncation_metadata
+      record = Julewire::Core::Records::Record.from_normalized_hash(
+        normalized_record(payload: { _julewire_truncation: symbol_truncation_metadata })
+      )
+
+      assert_symbol_truncation_metadata record.dig(:payload, :_julewire_truncation),
+                                        fields: ["field"],
+                                        max_depth: 20,
+                                        max_string_bytes: 10
+    end
+
     private
 
     def assert_record_rejects_string_keys(record)
@@ -139,6 +150,17 @@ module Julewire
       raise ArgumentError, "payload depth must be at least 1" if depth < 1
 
       (depth - 1).times.reduce({ "unsafe" => true }) { |value, index| { "level_#{index}": value } }
+    end
+
+    def symbol_truncation_metadata
+      {
+        truncated: true,
+        truncated_fields: ["field"],
+        limits: {
+          max_depth: 20,
+          max_string_bytes: 10
+        }
+      }
     end
 
     def deep_value_contains?(value, expected)

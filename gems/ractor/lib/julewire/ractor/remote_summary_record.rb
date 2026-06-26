@@ -8,7 +8,7 @@ module Julewire
       end
 
       def owned_summary_record_input
-        @owned_summary_record_input ||= Core::Fields::FieldSet.deep_symbolize_keys(@record)
+        @owned_summary_record_input ||= Core::Fields::FieldSet.deep_symbolize_owned_keys(@record)
       end
     end
   end

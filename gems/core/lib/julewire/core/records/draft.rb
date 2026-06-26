@@ -94,7 +94,7 @@ module Julewire
             normalized = data.dup
             lineage ||= Execution::Lineage.from_execution_hash(normalized[:execution])
             normalized[:execution] = Execution::Lineage.clean_normalized_lazy_relationship_hash(normalized[:execution])
-            normalized = Fields::Internal.frozen_copy(normalized) if freeze_sections
+            normalized = Fields::Internal.frozen_owned_copy(normalized) if freeze_sections
             new(
               normalized,
               lineage: lineage,
@@ -183,7 +183,7 @@ module Julewire
 
         def each_key(&) = @data.each_key(&)
 
-        def to_h = Fields::FieldSet.deep_dup(@data)
+        def to_h = Fields::FieldSet.deep_dup_owned(@data)
 
         def transform_field!(key)
           key = Fields::Internal.normalize_key(key)
@@ -237,7 +237,7 @@ module Julewire
         end
 
         def ensure_mutable_data!
-          @data = Fields::FieldSet.deep_dup(@data) if @data.frozen?
+          @data = Fields::FieldSet.deep_dup_owned(@data) if @data.frozen?
         end
 
         def transformed_field_lineage(key, value)

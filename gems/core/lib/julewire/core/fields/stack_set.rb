@@ -48,8 +48,8 @@ module Julewire
           stack(section).delete(path)
         end
 
-        def with(section, fields, owned: false, &)
-          stack(section).with(fields, owned: owned, &)
+        def with(section, fields = nil, owned: false, **keyword_fields, &)
+          stack(section).with(fields, owned: owned, **keyword_fields, &)
         end
 
         def without(section, path, &)

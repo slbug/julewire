@@ -69,7 +69,7 @@ module Julewire
 
           def restore(carrier, key: DEFAULT_KEY, link_executions: false, max_bytes: DEFAULT_MAX_BYTES, &)
             envelope = extract_result(carrier, key: key, max_bytes: max_bytes).envelope
-            Propagation.restore(envelope, link_executions: link_executions, &)
+            Propagation.restore(envelope, link_executions: link_executions, owned: true, &)
           end
 
           def serialized_envelope(envelope)
@@ -92,7 +92,7 @@ module Julewire
             parsed = JSON.parse(string)
             return extracted_failure(:non_hash, "carrier payload must be a JSON object") unless parsed.is_a?(Hash)
 
-            extracted(Fields::FieldSet.deep_symbolize_keys(parsed), :ok)
+            extracted(Fields::FieldSet.deep_symbolize_owned_keys(parsed), :ok)
           rescue StandardError => e
             extracted_failure(:malformed, "carrier payload is not valid JSON", e)
           end

@@ -17,7 +17,7 @@ module Julewire
             def section(value)
               return {} unless value.is_a?(Hash)
 
-              Fields::FieldSet.deep_symbolize_keys(value)
+              Fields::FieldSet.deep_symbolize_owned_keys(value)
             end
 
             def sections(source, sections: Fields::Bags.record_hash_sections)

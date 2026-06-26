@@ -83,7 +83,7 @@ module Julewire
         private
 
         def cached_copier(compact_empty:, freeze_values:, max_array_items:, max_depth:, max_hash_keys:,
-                          max_string_bytes:, symbolize_keys:)
+                          max_string_bytes:, preserve_truncation_metadata:, symbolize_keys:)
           options = copier_options(
             compact_empty: compact_empty,
             freeze_values: freeze_values,
@@ -91,6 +91,7 @@ module Julewire
             max_depth: max_depth,
             max_hash_keys: max_hash_keys,
             max_string_bytes: max_string_bytes,
+            preserve_truncation_metadata: preserve_truncation_metadata,
             symbolize_keys: symbolize_keys
           )
           return new(**options) unless cacheable_options?(options)
@@ -113,13 +114,14 @@ module Julewire
             max_array_items: options.fetch(:max_array_items),
             max_depth: options.fetch(:max_depth),
             max_hash_keys: options.fetch(:max_hash_keys),
+            preserve_truncation_metadata: options.fetch(:preserve_truncation_metadata),
             symbolize_keys: options.fetch(:symbolize_keys)
           )
           bucket[options.fetch(:max_string_bytes)] ||= new(**options)
         end
 
         def copier_options(compact_empty:, freeze_values:, max_array_items:, max_depth:, max_hash_keys:,
-                           max_string_bytes:, symbolize_keys:)
+                           max_string_bytes:, preserve_truncation_metadata:, symbolize_keys:)
           {
             compact_empty: compact_empty,
             freeze_values: freeze_values,
@@ -127,15 +129,17 @@ module Julewire
             max_depth: max_depth,
             max_hash_keys: max_hash_keys,
             max_string_bytes: max_string_bytes,
+            preserve_truncation_metadata: preserve_truncation_metadata,
             symbolize_keys: symbolize_keys
           }
         end
 
         def cache_bucket(pool, compact_empty:, freeze_values:, max_array_items:, max_depth:, max_hash_keys:,
-                         symbolize_keys:)
+                         preserve_truncation_metadata:, symbolize_keys:)
           flags = cache_flags(
             compact_empty: compact_empty,
             freeze_values: freeze_values,
+            preserve_truncation_metadata: preserve_truncation_metadata,
             symbolize_keys: symbolize_keys
           )
           by_depth = (pool[flags] ||= {})
@@ -144,11 +148,12 @@ module Julewire
           by_hash[max_hash_keys] ||= {}
         end
 
-        def cache_flags(compact_empty:, freeze_values:, symbolize_keys:)
+        def cache_flags(compact_empty:, freeze_values:, preserve_truncation_metadata:, symbolize_keys:)
           flags = 0
           flags |= 1 if compact_empty
           flags |= 2 if freeze_values
           flags |= 4 if symbolize_keys
+          flags |= 8 if preserve_truncation_metadata
           flags
         end
 
@@ -175,7 +180,7 @@ module Julewire
         class << self
           include ValueCopyCache
 
-          def call(
+          def call( # rubocop:disable Metrics/ParameterLists
             value,
             compact_empty: false,
             freeze_values: false,
@@ -183,6 +188,7 @@ module Julewire
             max_depth: Core::NORMALIZATION_MAX_DEPTH,
             max_hash_keys: nil,
             max_string_bytes: nil,
+            preserve_truncation_metadata: false,
             symbolize_keys: false
           )
             needs_string_limit = value.is_a?(String) && max_string_bytes
@@ -196,6 +202,7 @@ module Julewire
                 max_depth: max_depth,
                 max_hash_keys: max_hash_keys,
                 max_string_bytes: max_string_bytes,
+                preserve_truncation_metadata: preserve_truncation_metadata,
                 symbolize_keys: symbolize_keys
               ),
               value
@@ -220,6 +227,7 @@ module Julewire
               max_depth: copier.max_depth,
               max_hash_keys: copier.max_hash_keys,
               max_string_bytes: copier.max_string_bytes,
+              preserve_truncation_metadata: copier.preserve_truncation_metadata,
               symbolize_keys: copier.symbolize_keys
             ).call(value)
           end
@@ -245,16 +253,17 @@ module Julewire
         end
 
         attr_reader :compact_empty, :freeze_values, :max_array_items, :max_depth, :max_hash_keys, :max_string_bytes,
-                    :symbolize_keys
+                    :preserve_truncation_metadata, :symbolize_keys
 
         def initialize(compact_empty:, freeze_values:, max_array_items:, max_depth:, max_hash_keys:, max_string_bytes:,
-                       symbolize_keys:)
+                       preserve_truncation_metadata:, symbolize_keys:)
           @compact_empty = compact_empty
           @freeze_values = freeze_values
           @max_array_items = validate_optional_limit(max_array_items, name: :max_array_items)
           @max_depth = max_depth
           @max_hash_keys = validate_optional_limit(max_hash_keys, name: :max_hash_keys)
           @max_string_bytes = validate_optional_limit(max_string_bytes, name: :max_string_bytes)
+          @preserve_truncation_metadata = preserve_truncation_metadata
           @symbolize_keys = symbolize_keys
           @in_use = false
           @last_truncated = false
@@ -341,11 +350,19 @@ module Julewire
         end
 
         def copy_truncation_metadata_entry(result, fields, key, item, depth)
-          raise_reserved_key!(key) unless allowed_truncation_metadata_key?(key) && TruncationMetadata.valid?(item)
+          unless @preserve_truncation_metadata &&
+                 allowed_truncation_metadata_key?(key) &&
+                 TruncationMetadata.valid?(item, max_fields: truncation_metadata_field_limit)
+            raise_reserved_key!(key)
+          end
 
           result[copy_truncation_metadata_key(key)] = copy_value(item, depth + 1)
           consume_truncated
           fields
+        end
+
+        def truncation_metadata_field_limit
+          @max_array_items || Serializer::DEFAULT_MAX_ARRAY_ITEMS
         end
 
         def allowed_truncation_metadata_key?(key)

@@ -13,10 +13,10 @@ module Julewire
         end
 
         def capture_local
-          capture_with { Fields::FieldSet.deep_dup(it) }
+          capture_with { Fields::FieldSet.deep_dup_owned(it) }
         end
 
-        def restore(envelope, link_executions: false, &)
+        def restore(envelope, link_executions: false, owned: false, &)
           raise ArgumentError, "block required" unless block_given?
 
           sections = FIELD_SECTIONS.to_h { |section| [section, hash_value(envelope, section)] }
@@ -25,6 +25,7 @@ module Julewire
             **sections,
             execution: execution,
             link_executions: link_executions,
+            owned: owned,
             &
           )
         end

@@ -61,14 +61,14 @@ module Julewire
             fields
           end
 
-          def valid?(value)
+          def valid?(value, max_fields: nil)
             return false unless value.is_a?(Hash)
             return false unless valid_top_level_keys?(value)
             return false unless fetch_key(value, :truncated) == true
 
             fields = fetch_key(value, :truncated_fields)
             limits = fetch_key(value, :limits)
-            valid_fields?(fields) && valid_limits?(limits)
+            valid_fields?(fields, max_fields: max_fields) && valid_limits?(limits)
           end
 
           private
@@ -101,16 +101,27 @@ module Julewire
           end
 
           def valid_top_level_keys?(value)
+            return false if value.length > METADATA_KEYS.length * 2
+
             value.keys.all? { known_key?(it, METADATA_KEYS, METADATA_KEY_NAMES) } &&
               METADATA_KEYS.all? { value.key?(it) || value.key?(it.to_s) }
           end
 
-          def valid_fields?(fields)
-            fields.is_a?(Array) && fields.all? { it.is_a?(String) || it.is_a?(Symbol) }
+          def valid_fields?(fields, max_fields:)
+            return false unless fields.is_a?(Array)
+
+            seen = 0
+            fields.each do |field|
+              seen += 1
+              return false if max_fields && seen > max_fields
+              return false unless field.is_a?(String) || field.is_a?(Symbol)
+            end
+            true
           end
 
           def valid_limits?(limits)
             return false unless limits.is_a?(Hash)
+            return false if limits.length > LIMIT_KEYS.length * 2
 
             limits.all? do |key, value|
               known_key?(key, LIMIT_KEYS, LIMIT_KEY_NAMES) && (value.nil? || value.is_a?(Integer))

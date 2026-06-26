@@ -13,16 +13,19 @@ module Julewire
         class Layer
           attr_reader :fields, :parent
 
-          def initialize(parent, fields, delete_paths: nil, clear_parent_deletes: true)
+          def initialize(parent, fields, delete_paths: nil, clear_parent_deletes: true, owned: false)
             @parent = parent
             @fields = fields
             @delete_paths = delete_paths
             @clear_parent_deletes = clear_parent_deletes
+            @owned = owned
             @active_delete_paths_computed = false
             @active_delete_paths = nil
             @snapshot = nil
             @value_cache = nil
           end
+
+          def owned? = @owned
 
           def snapshot
             @snapshot ||= build_snapshot
@@ -35,7 +38,7 @@ module Julewire
                       FieldSet.value_for(snapshot, key, default: MISSING)
                     else
                       field_value = FieldSet.value_for(@fields, key, default: MISSING)
-                      field_value.equal?(MISSING) ? parent_value_for(key) : Fields::Internal.frozen_copy(field_value)
+                      field_value.equal?(MISSING) ? parent_value_for(key) : frozen_field_value(field_value)
                     end
             (@value_cache ||= {})[key] = value
           end
@@ -56,6 +59,14 @@ module Julewire
             @clear_parent_deletes ? @delete_paths : active_delete_paths
           end
 
+          def merge_into(snapshot)
+            if @owned
+              Fields::Internal.merge_owned!(snapshot, FieldSet.deep_symbolize_owned_keys(@fields))
+            else
+              FieldSet.merge!(snapshot, @fields)
+            end
+          end
+
           private
 
           def build_snapshot
@@ -64,30 +75,35 @@ module Julewire
 
             snapshot = source_snapshot_base
             source_chain.reverse_each do |source|
-              FieldSet.merge!(snapshot, source.fields)
+              source.merge_into(snapshot)
               paths = source.delete_paths_for_snapshot
               Fields::Internal.apply_delete_paths!(snapshot, paths) if paths
             end
-            Fields::Internal.frozen_copy(snapshot)
+            Fields::Internal.frozen_owned_copy(snapshot)
           end
 
           def build_direct_snapshot
-            snapshot = FieldSet.merge!({}, @fields)
+            snapshot = merge_into({})
             paths = delete_paths_for_snapshot
             Fields::Internal.apply_delete_paths!(snapshot, paths) if paths
-            Fields::Internal.frozen_copy(snapshot)
+            Fields::Internal.frozen_owned_copy(snapshot)
           end
 
           def build_parent_snapshot
-            snapshot = FieldSet.merge(@parent.snapshot, @fields)
+            snapshot = FieldSet.deep_dup_owned(@parent.snapshot)
+            merge_into(snapshot)
             paths = delete_paths_for_snapshot
             Fields::Internal.apply_delete_paths!(snapshot, paths) if paths
-            Fields::Internal.frozen_copy(snapshot)
+            Fields::Internal.frozen_owned_copy(snapshot)
           end
 
           def source_snapshot_base
             source = source_chain_base
-            source ? FieldSet.deep_dup(source.snapshot) : {}
+            source ? FieldSet.deep_dup_owned(source.snapshot) : {}
+          end
+
+          def frozen_field_value(value)
+            @owned ? Fields::Internal.frozen_owned_copy(value) : Fields::Internal.frozen_copy(value)
           end
 
           def source_chain
@@ -181,7 +197,7 @@ module Julewire
           return if fields.empty?
 
           fields = normalize_owned_keys(fields) if owned
-          @source = Layer.new(@source, fields, clear_parent_deletes: true)
+          @source = Layer.new(@source, fields, clear_parent_deletes: true, owned: owned)
           invalidate_snapshot!
         end
 
@@ -199,7 +215,7 @@ module Julewire
           return yield if fields.empty?
 
           fields = normalize_owned_keys(fields) if owned
-          with_layer(fields, &)
+          with_layer(fields, owned: owned, &)
         end
 
         def without(path, &)
@@ -226,9 +242,15 @@ module Julewire
           FieldSet.coerce(fields, keyword_fields)
         end
 
-        def with_layer(fields, delete_paths: nil)
+        def with_layer(fields, delete_paths: nil, owned: false)
           previous_source = @source
-          @source = Layer.new(previous_source, fields, delete_paths: delete_paths, clear_parent_deletes: false)
+          @source = Layer.new(
+            previous_source,
+            fields,
+            delete_paths: delete_paths,
+            clear_parent_deletes: false,
+            owned: owned
+          )
           invalidate_snapshot!
           begin
             yield
@@ -250,11 +272,15 @@ module Julewire
           unless @source.parent
             # Single-layer hits avoid Layer's delete-path/cache bookkeeping.
             field_value = FieldSet.value_for(@source.fields, key, default: MISSING)
-            return Fields::Internal.frozen_copy(field_value) unless field_value.equal?(MISSING)
+            return frozen_source_value(field_value, @source.owned?) unless field_value.equal?(MISSING)
           end
 
           value = @source.value_for(key)
           value.equal?(MISSING) ? MISSING : value
+        end
+
+        def frozen_source_value(value, owned)
+          owned ? Fields::Internal.frozen_owned_copy(value) : Fields::Internal.frozen_copy(value)
         end
 
         def invalidate_snapshot!

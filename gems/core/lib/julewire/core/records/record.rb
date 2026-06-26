@@ -155,7 +155,8 @@ module Julewire
           def snapshot_hash(record)
             Serialization::ValueCopy.call(
               record,
-              freeze_values: true
+              freeze_values: true,
+              preserve_truncation_metadata: true
             )
           end
         end
@@ -178,7 +179,7 @@ module Julewire
 
         def each(&) = @data.each(&)
 
-        def to_h = Fields::FieldSet.deep_dup(@data)
+        def to_h = Fields::FieldSet.deep_dup_owned(@data)
 
         # @api internal
         def serializable_data = @data
