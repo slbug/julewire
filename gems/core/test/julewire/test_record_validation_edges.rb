@@ -16,6 +16,15 @@ module Julewire
       def eql?(other) = other.is_a?(self.class)
     end
 
+    class SinglePassHash < Hash
+      def each(...)
+        @each_count = @each_count.to_i + 1
+        raise "container was walked more than once" if @each_count > 1
+
+        super
+      end
+    end
+
     def test_record_from_normalized_hash_rejects_string_subclass_keys
       key = Class.new(String).new("payload")
 
@@ -34,6 +43,45 @@ module Julewire
       equal_container_cases.each do |clean, unsafe|
         assert_record_rejects_string_keys(normalized_record(payload: { clean: clean, unsafe: unsafe }))
       end
+    end
+
+    def test_record_from_normalized_hash_visits_shared_containers_once_by_identity
+      shared = SinglePassHash.new.merge!(safe: true)
+
+      record = normalized_record(payload: { first: shared, second: shared })
+
+      assert_same record, Julewire::Core::Records::Record.validate_normalized_hash!(record)
+    end
+
+    def test_record_from_normalized_hash_continues_after_shared_container
+      shared = { safe: true }
+
+      assert_record_rejects_string_keys(
+        normalized_record(payload: { first: shared, second: shared, unsafe: { "unsafe" => true } })
+      )
+    end
+
+    def test_record_from_normalized_hash_rejects_string_keys_at_last_surviving_depth
+      assert_record_rejects_string_keys(
+        normalized_record(payload: deep_string_key_hash_at_record_depth(Julewire::Core::NORMALIZATION_MAX_DEPTH - 1))
+      )
+    end
+
+    def test_record_from_normalized_hash_ignores_string_keys_past_normalization_depth
+      record = Julewire::Core::Records::Record.from_normalized_hash(
+        normalized_record(payload: deep_string_key_hash_at_record_depth(Julewire::Core::NORMALIZATION_MAX_DEPTH))
+      )
+
+      assert deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
+    end
+
+    def test_record_from_normalized_hash_continues_after_depth_cutoff_branch
+      payload = {
+        deep: deep_string_key_hash_at_record_depth(Julewire::Core::NORMALIZATION_MAX_DEPTH),
+        shallow: { "unsafe" => true }
+      }
+
+      assert_record_rejects_string_keys(normalized_record(payload: payload))
     end
 
     def test_draft_from_normalized_hash_rejects_string_keys
@@ -85,6 +133,20 @@ module Julewire
         [EqualHash.new.merge!(safe: true), EqualHash.new.merge!("unsafe" => true)],
         [EqualArray.new.push({ safe: true }), EqualArray.new.push({ "unsafe" => true })]
       ]
+    end
+
+    def deep_string_key_hash_at_record_depth(depth)
+      raise ArgumentError, "payload depth must be at least 1" if depth < 1
+
+      (depth - 1).times.reduce({ "unsafe" => true }) { |value, index| { "level_#{index}": value } }
+    end
+
+    def deep_value_contains?(value, expected)
+      return true if value == expected
+      return value.any? { deep_value_contains?(it, expected) } if value.is_a?(Array)
+      return value.any? { |_, item| deep_value_contains?(item, expected) } if value.is_a?(Hash)
+
+      false
     end
   end
 end

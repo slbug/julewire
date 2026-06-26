@@ -4,8 +4,9 @@ require "test_helper"
 
 module Julewire
   class TestRecordNormalizationBounds < Minitest::Test
-    cover Julewire::Core::Records::Record
     cover Julewire::Core::Serialization::ValueCopy
+
+    PATHOLOGICAL_DEPTH = 5_000
 
     def test_record_draft_build_bounds_deep_payload_normalization
       draft = Julewire::Core::Records::Draft.build(
@@ -189,6 +190,29 @@ module Julewire
       assert deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
     end
 
+    def test_record_from_normalized_hash_bounds_pathological_depth_before_validation_overflows
+      record = Julewire::Core::Records::Record.from_normalized_hash(
+        normalized_record(payload: { nested: deep_hash(PATHOLOGICAL_DEPTH) })
+      )
+
+      assert_deep_payload_bounded record
+    end
+
+    def test_draft_from_normalized_hash_bounds_pathological_depth_before_validation_overflows
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(
+        normalized_record(payload: { nested: deep_hash(PATHOLOGICAL_DEPTH) })
+      )
+
+      assert_deep_payload_bounded draft
+    end
+
+    def test_record_finalization_bounds_pathological_depth_after_owned_mutation
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record, freeze_sections: false)
+      draft[:payload] = { nested: deep_hash(PATHOLOGICAL_DEPTH) }
+
+      assert_deep_payload_bounded draft.to_record
+    end
+
     private
 
     def deep_hash(depth)
@@ -197,6 +221,10 @@ module Julewire
 
     def key_symbol(index)
       :"key_#{index}"
+    end
+
+    def assert_deep_payload_bounded(record)
+      assert deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
     end
 
     def deep_value_contains?(value, expected)

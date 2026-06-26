@@ -69,25 +69,38 @@ module Julewire
           end
 
           def validate_symbol_keys!(record)
-            validate_value_symbol_keys!(record, {}.compare_by_identity)
+            validate_value_symbol_keys!(record)
           end
 
-          def validate_value_symbol_keys!(value, seen)
-            case value
-            when Hash
-              return if seen.key?(value)
+          def validate_value_symbol_keys!(root)
+            queue = [[root, 0]]
+            seen = {}.compare_by_identity
 
-              seen[value] = nil
+            queue.each do |value, depth|
+              break if depth == NORMALIZATION_MAX_DEPTH
+              next unless mark_symbol_key_container(value, seen)
+
+              enqueue_symbol_key_children(queue, value, depth + 1)
+            end
+          end
+
+          def mark_symbol_key_container(value, seen)
+            return unless value.is_a?(Hash) || value.is_a?(Array)
+            return if seen.key?(value)
+
+            seen[value] = nil
+            value
+          end
+
+          def enqueue_symbol_key_children(queue, value, depth)
+            if value.is_a?(Hash)
               value.each do |key, item|
                 raise TypeError, "record must not use string keys" if key.is_a?(String)
 
-                validate_value_symbol_keys!(item, seen)
+                queue << [item, depth]
               end
-            when Array
-              return if seen.key?(value)
-
-              seen[value] = nil
-              value.each { validate_value_symbol_keys!(it, seen) }
+            else
+              value.each { queue << [it, depth] }
             end
           end
 
