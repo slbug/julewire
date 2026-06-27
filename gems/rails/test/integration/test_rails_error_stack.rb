@@ -5,6 +5,11 @@ require_relative "../dummy/config/environment"
 
 module Julewire
   class TestRailsErrorStack < Minitest::Test
+    cover "Julewire::Rails::Configuration#controller_capture?"
+    cover "Julewire::Rails::Configuration#silence_log_subscribers?"
+    cover "Julewire::Rails::Railtie.install_subscribers"
+    cover Julewire::Rails::RequestMiddleware
+    cover Julewire::Rails::Subscribers::Error
     def setup
       super
       Julewire::Rails::Railtie.install_subscribers(::Rails.application.config.julewire_rails)

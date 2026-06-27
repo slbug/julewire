@@ -40,6 +40,7 @@ module Julewire
               experimental: true,
               failure_count: @failure_count.value,
               last_error_class: @last_error.get&.fetch(:class),
+              last_error_message: @last_error.get&.fetch(:message),
               messages: @message_count.value,
               started_threads: @started_threads.value,
               stopped_threads: @stopped_threads.value
@@ -66,7 +67,7 @@ module Julewire
 
           def record_failure(error)
             @failure_count.increment
-            @last_error.set({ class: error.class.name })
+            @last_error.set({ class: error.class.name, message: error.message })
           end
         end
       end

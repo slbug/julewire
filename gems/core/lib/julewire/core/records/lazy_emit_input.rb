@@ -24,18 +24,12 @@ module Julewire
           end
 
           def each
-            return enum_for(:each) unless block_given?
+            return enum_for unless block_given?
 
             input_hash.each do |key, value|
               yield key, value unless severity_key?(key)
             end
             yield :severity, @severity
-          end
-
-          def to_h
-            each_with_object({}) do |(key, value), hash|
-              hash[key] = value
-            end
           end
 
           private
@@ -66,9 +60,7 @@ module Julewire
             SeverityInput.new(severity, input)
           end
 
-          def input?(value)
-            value.is_a?(SeverityInput)
-          end
+          def input?(value) = value.instance_of?(SeverityInput)
 
           private
 
@@ -88,8 +80,6 @@ module Julewire
           end
 
           def without_severity(input)
-            return input unless input.is_a?(Hash)
-
             RawInput.without_severity_keys(input)
           end
         end

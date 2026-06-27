@@ -17,10 +17,10 @@ module Julewire
         private
 
         def update_subscription(configuration)
-          @subscription&.update(configuration)
+          @subscription.update(configuration)
         end
 
-        def store_subscription(subscriber, unsubscribe: nil)
+        def store_subscription(subscriber, unsubscribe:)
           @subscription = Subscription.new(subscriber, unsubscribe: unsubscribe)
           subscriber
         end

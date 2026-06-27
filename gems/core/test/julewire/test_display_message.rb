@@ -6,7 +6,7 @@ module Julewire
   module DisplayMessageTestHelpers
     KEYS = Julewire::Core::Fields::AttributeKeys
 
-    def display = Julewire::Core::Records::DisplayMessage
+    def display_message = Julewire::Core::Records::DisplayMessage
 
     def build_display_record(input = nil, neutral: {}, **fields)
       input = (input || {}).merge(fields)
@@ -20,14 +20,13 @@ module Julewire
     end
 
     def assert_display_message(expected, input = nil, neutral: {}, **fields)
-      assert_equal expected, display.call(build_display_record(input, neutral: neutral, **fields))
+      assert_equal expected, display_message.call(build_display_record(input, neutral: neutral, **fields))
     end
   end
 
   class TestDisplayMessageBasic < Minitest::Test
-    include DisplayMessageTestHelpers
-
     cover Julewire::Core::Records::DisplayMessage
+    include DisplayMessageTestHelpers
 
     def test_explicit_message_wins
       record = build_display_record(
@@ -35,33 +34,33 @@ module Julewire
         neutral: { KEYS::HTTP_REQUEST_METHOD => "GET", KEYS::URL_PATH => "/orders" }
       )
 
-      assert_equal "explicit", display.call(record)
+      assert_equal "explicit", display_message.call(record)
     end
 
     def test_blank_explicit_message_falls_back_to_error
       record = build_display_record(message: "", error: RuntimeError.new("boom"))
 
-      assert_equal "RuntimeError: boom", display.call(record)
+      assert_equal "RuntimeError: boom", display_message.call(record)
     end
 
     def test_display_message_reads_duck_typed_indexed_records
       record = Object.new
       record.define_singleton_method(:[]) { it == "message" ? "from indexer" : nil }
 
-      assert_equal "from indexer", display.call(record)
+      assert_equal "from indexer", display_message.call(record)
     end
 
     def test_blank_or_unreadable_input_has_no_display_message
-      assert_nil display.call({})
-      assert_nil display.call(error: { class: "", message: "" })
-      assert_nil display.call(Object.new)
+      assert_nil display_message.call({})
+      assert_nil display_message.call(error: { class: "", message: "" })
+      assert_nil display_message.call(Object.new)
     end
 
     def test_indexer_failure_has_no_display_message
       record = Object.new
       record.define_singleton_method(:[]) { raise "unreadable" }
 
-      assert_nil display.call(record)
+      assert_nil display_message.call(record)
     end
 
     def test_method_missing_indexer_is_not_used_without_respond_to
@@ -75,14 +74,13 @@ module Julewire
         def respond_to_missing?(_method_name, _include_private = false) = false
       end.new
 
-      assert_nil display.call(record)
+      assert_nil display_message.call(record)
     end
   end
 
   class TestDisplayMessageHttp < Minitest::Test
-    include DisplayMessageTestHelpers
-
     cover Julewire::Core::Records::DisplayMessage
+    include DisplayMessageTestHelpers
 
     def test_http_neutral_message_includes_error_and_duration
       record = build_display_record(
@@ -94,7 +92,7 @@ module Julewire
         }
       )
 
-      assert_equal "GET /orders -> 500 RuntimeError in 12.5ms", display.call(record)
+      assert_equal "GET /orders -> 500 RuntimeError in 12.5ms", display_message.call(record)
     end
 
     def test_http_neutral_message_uses_full_url_when_path_is_missing
@@ -107,7 +105,7 @@ module Julewire
         }
       )
 
-      assert_equal "POST https://example.test/orders -> 201 in 1.235ms", display.call(record)
+      assert_equal "POST https://example.test/orders -> 201 in 1.235ms", display_message.call(record)
     end
 
     def test_http_neutral_message_omits_invalid_duration
@@ -120,7 +118,7 @@ module Julewire
         }
       )
 
-      assert_equal "GET /orders -> 200", display.call(record)
+      assert_equal "GET /orders -> 200", display_message.call(record)
     end
 
     def test_http_neutral_message_formats_non_finite_duration
@@ -133,13 +131,14 @@ module Julewire
         }
       }
 
-      assert_equal "GET /orders -> 200 in Infms", display.call(record)
+      assert_equal "GET /orders -> 200 in Infms", display_message.call(record)
     end
 
     def test_http_neutral_message_requires_method_path_and_status
-      assert_nil display.call(neutral: { KEYS::HTTP_REQUEST_METHOD => "GET", KEYS::URL_PATH => "/orders" })
-      assert_nil display.call(neutral: { KEYS::HTTP_REQUEST_METHOD => "GET", KEYS::HTTP_RESPONSE_STATUS_CODE => 200 })
-      assert_nil display.call(neutral: { KEYS::URL_PATH => "/orders", KEYS::HTTP_RESPONSE_STATUS_CODE => 200 })
+      assert_nil display_message.call(neutral: { KEYS::HTTP_REQUEST_METHOD => "GET", KEYS::URL_PATH => "/orders" })
+      assert_nil display_message.call(neutral: { KEYS::HTTP_REQUEST_METHOD => "GET",
+                                                 KEYS::HTTP_RESPONSE_STATUS_CODE => 200 })
+      assert_nil display_message.call(neutral: { KEYS::URL_PATH => "/orders", KEYS::HTTP_RESPONSE_STATUS_CODE => 200 })
     end
 
     def test_serialized_hash_neutral_message
@@ -152,14 +151,13 @@ module Julewire
         }
       }
 
-      assert_equal "GET /orders -> 200 in 3.5ms", display.call(record)
+      assert_equal "GET /orders -> 200 in 3.5ms", display_message.call(record)
     end
   end
 
   class TestDisplayMessageJob < Minitest::Test
-    include DisplayMessageTestHelpers
-
     cover Julewire::Core::Records::DisplayMessage
+    include DisplayMessageTestHelpers
 
     def test_job_neutral_message
       record = build_display_record(
@@ -172,7 +170,7 @@ module Julewire
         }
       )
 
-      assert_equal "active_job ImportJob queue=default -> succeeded in 9ms", display.call(record)
+      assert_equal "active_job ImportJob queue=default -> succeeded in 9ms", display_message.call(record)
     end
 
     def test_job_neutral_message_coerces_non_string_status
@@ -205,7 +203,7 @@ module Julewire
         }
       )
 
-      assert_equal "job ImportJob -> 202 RuntimeError", display.call(record)
+      assert_equal "job ImportJob -> 202 RuntimeError", display_message.call(record)
     end
 
     def test_job_neutral_message_accepts_hash_subclass_error
@@ -215,7 +213,7 @@ module Julewire
         neutral: { KEYS::JOB_NAME => "ImportJob" }
       }
 
-      assert_equal "job ImportJob -> SubError", display.call(record)
+      assert_equal "job ImportJob -> SubError", display_message.call(record)
     end
 
     def test_job_neutral_message_uses_id_without_name
@@ -226,13 +224,13 @@ module Julewire
         }
       )
 
-      assert_equal "job 123 -> failed", display.call(record)
+      assert_equal "job 123 -> failed", display_message.call(record)
     end
 
     def test_job_neutral_message_uses_system_without_name_or_id
       record = build_display_record(neutral: { KEYS::JOB_SYSTEM => "active_job" })
 
-      assert_equal "active_job", display.call(record)
+      assert_equal "active_job", display_message.call(record)
     end
 
     def test_job_neutral_message_includes_error_when_status_is_missing
@@ -241,7 +239,7 @@ module Julewire
         neutral: { KEYS::JOB_NAME => "ImportJob" }
       )
 
-      assert_equal "job ImportJob -> RuntimeError in 2.001ms", display.call(record)
+      assert_equal "job ImportJob -> RuntimeError in 2.001ms", display_message.call(record)
     end
 
     def test_neutral_message_omits_blank_optional_parts
@@ -253,14 +251,13 @@ module Julewire
         }
       )
 
-      assert_equal "active_job ImportJob -> succeeded", display.call(record)
+      assert_equal "active_job ImportJob -> succeeded", display_message.call(record)
     end
   end
 
   class TestDisplayMessageMessaging < Minitest::Test
-    include DisplayMessageTestHelpers
-
     cover Julewire::Core::Records::DisplayMessage
+    include DisplayMessageTestHelpers
 
     def test_messaging_neutral_message
       record = build_display_record(
@@ -275,52 +272,54 @@ module Julewire
         }
       )
 
-      assert_equal "kafka process orders partition=1 offset=42 messages=3 RuntimeError in 4.25ms", display.call(record)
+      assert_equal "kafka process orders partition=1 offset=42 messages=3 RuntimeError in 4.25ms",
+                   display_message.call(record)
     end
 
     def test_messaging_neutral_message_accepts_partial_neutral_fields
-      assert_equal "kafka", display.call(neutral: { KEYS::MESSAGING_SYSTEM => "kafka" })
-      assert_equal "messaging consume", display.call(neutral: { KEYS::MESSAGING_OPERATION_NAME => "consume" })
-      assert_equal "messaging orders", display.call(neutral: { KEYS::MESSAGING_DESTINATION_NAME => "orders" })
+      assert_equal "kafka", display_message.call(neutral: { KEYS::MESSAGING_SYSTEM => "kafka" })
+      assert_equal "messaging consume", display_message.call(neutral: { KEYS::MESSAGING_OPERATION_NAME => "consume" })
+      assert_equal "messaging orders", display_message.call(neutral: { KEYS::MESSAGING_DESTINATION_NAME => "orders" })
     end
   end
 
   class TestDisplayMessageError < Minitest::Test
-    include DisplayMessageTestHelpers
-
     cover Julewire::Core::Records::DisplayMessage
+    include DisplayMessageTestHelpers
 
     def test_error_fallback
       record = build_display_record(error: RuntimeError.new("boom"))
 
-      assert_equal "RuntimeError: boom", display.call(record)
+      assert_equal "RuntimeError: boom", display_message.call(record)
     end
 
     def test_error_fallback_accepts_partial_error_hashes
-      assert_equal "RuntimeError", display.call(error: { class: "RuntimeError" })
-      assert_equal "boom", display.call(error: { message: "boom" })
+      assert_equal "RuntimeError", display_message.call(error: { class: "RuntimeError" })
+      assert_equal "boom", display_message.call(error: { message: "boom" })
     end
 
     def test_error_fallback_coerces_non_string_message_parts
-      assert_equal "404", display.call(error: { message: 404 })
-      assert_equal "RuntimeError", display.call(error: { class: :RuntimeError })
-      assert_equal "RuntimeError: 404", display.call(error: { class: "RuntimeError", message: 404 })
-      assert_equal "RuntimeError: 404", display.call(error: { class: :RuntimeError, message: 404 })
+      assert_equal "404", display_message.call(error: { message: 404 })
+      assert_equal "RuntimeError", display_message.call(error: { class: :RuntimeError })
+      assert_equal "RuntimeError: 404", display_message.call(error: { class: "RuntimeError", message: 404 })
+      assert_equal "RuntimeError: 404", display_message.call(error: { class: :RuntimeError, message: 404 })
     end
 
     def test_error_summary_is_shared_for_provider_formatters
-      assert_equal "RuntimeError: boom", display.error_summary(class: "RuntimeError", message: "boom")
-      assert_equal "RuntimeError", display.error_summary(class: "RuntimeError")
-      assert_equal "boom", display.error_summary(message: "boom")
-      assert_nil display.error_summary("boom")
+      assert_equal "RuntimeError: boom", display_message.error_summary(class: "RuntimeError", message: "boom")
+      assert_equal "RuntimeError", display_message.error_summary(class: "RuntimeError")
+      assert_equal "boom", display_message.error_summary(message: "boom")
+      assert_nil display_message.error_summary("boom")
     end
 
     def test_error_summary_reads_string_keys_and_ignores_non_hash_errors
       hash_subclass = Class.new(Hash)
 
-      assert_equal "RuntimeError: boom", display.call("error" => { "class" => "RuntimeError", "message" => "boom" })
-      assert_equal "SubError: sub", display.error_summary(hash_subclass.new.merge!(class: "SubError", message: "sub"))
-      assert_nil display.call(error: "boom")
+      assert_equal "RuntimeError: boom",
+                   display_message.call("error" => { "class" => "RuntimeError", "message" => "boom" })
+      assert_equal "SubError: sub",
+                   display_message.error_summary(hash_subclass.new.merge!(class: "SubError", message: "sub"))
+      assert_nil display_message.call(error: "boom")
     end
 
     def test_error_summary_ignores_non_hash_indexable_objects
@@ -333,15 +332,14 @@ module Julewire
         neutral: { KEYS::JOB_NAME => "ImportJob" }
       }
 
-      assert_equal "job ImportJob", display.call(record)
-      assert_nil display.error_summary(error)
+      assert_equal "job ImportJob", display_message.call(record)
+      assert_nil display_message.error_summary(error)
     end
   end
 
   class TestDisplayMessageSourceLocation < Minitest::Test
-    include DisplayMessageTestHelpers
-
     cover Julewire::Core::Records::DisplayMessage
+    include DisplayMessageTestHelpers
 
     def test_source_location_neutral_message
       record = build_display_record(
@@ -352,7 +350,7 @@ module Julewire
         }
       )
 
-      assert_equal "app/jobs/import_job.rb:42 ImportJob#perform", display.call(record)
+      assert_equal "app/jobs/import_job.rb:42 ImportJob#perform", display_message.call(record)
     end
 
     def test_source_location_neutral_message_without_line
@@ -380,7 +378,7 @@ module Julewire
       file.define_singleton_method(:to_s) { "dynamic.rb" }
       record = { neutral: { KEYS::CODE_FILE_PATH => file } }
 
-      assert_equal "dynamic.rb", display.call(record)
+      assert_equal "dynamic.rb", display_message.call(record)
     end
   end
 end

@@ -24,13 +24,13 @@ module Julewire
         return true if severity < level
         return true if Suppression.active?
 
-        message, progname = resolve_message_and_progname(message, progname) { block_given? ? yield : nil }
-        Core::RuntimeLocator.current.emit_without_level(record_for(severity, message, progname))
+        message, progname = resolve_message_and_progname(message, progname) { yield if block_given? }
+        Julewire::Core::RuntimeLocator.current.emit_without_level(record_for(severity, message, progname))
         true
       end
 
       def <<(message)
-        add(::Logger::UNKNOWN, message)
+        add(nil, message)
       end
 
       def debug(progname = nil, &) = add(::Logger::DEBUG, nil, progname, &)
@@ -43,7 +43,7 @@ module Julewire
 
       def fatal(progname = nil, &) = add(::Logger::FATAL, nil, progname, &)
 
-      def unknown(progname = nil, &) = add(::Logger::UNKNOWN, nil, progname, &)
+      def unknown(progname = nil, &) = add(nil, nil, progname, &)
 
       def debug? = level <= ::Logger::DEBUG
 
@@ -104,9 +104,8 @@ module Julewire
         Julewire.flush
       end
 
-      def initialize_copy(other)
-        super
-        @progname = other.progname.is_a?(String) ? other.progname.dup : other.progname
+      def initialize_copy(_other)
+        @progname = @progname.dup if @progname.is_a?(String)
         @local_level_key = :"julewire_rails_logger_level_#{object_id}"
       end
 
@@ -117,29 +116,39 @@ module Julewire
         when Integer
           value
         when Symbol, String
-          ::Logger::Severity.const_get(value.to_s.upcase)
+          ::Logger::Severity.const_get(value.upcase)
         else
-          raise ArgumentError, "invalid log level: #{value.inspect}"
+          raise_invalid_level(value)
         end
       rescue NameError
+        raise_invalid_level(value)
+      end
+
+      def raise_invalid_level(value)
         raise ArgumentError, "invalid log level: #{value.inspect}"
       end
 
       def resolve_message_and_progname(message, progname)
-        return [message, progname || self.progname] unless message.nil?
+        return [message, progname] unless message.nil?
 
         block_message = yield
-        return [block_message, progname || self.progname] unless block_message.nil?
+        return [block_message, progname] unless block_message.nil?
 
-        [progname, self.progname]
+        [progname]
       end
 
       def record_for(severity, message, progname)
         record = message.is_a?(Hash) ? structured_message(message) : scalar_message(message)
-        record[:severity] = Julewire::Core::Records::Severity.severity_symbol(severity) || :unknown
-        record[:logger] ||= (progname || self.progname).to_s
+        record[:severity] = record_severity(severity)
+        record[:logger] ||= (progname || @progname).to_s
         record[:source] ||= @source
         merge_current_tags(record)
+      end
+
+      def record_severity(value)
+        Julewire::Core::Records::Severity.normalize(value)
+      rescue ArgumentError
+        :unknown
       end
 
       def scalar_message(message)
@@ -156,28 +165,24 @@ module Julewire
         record = fields.slice(*RECORD_KEYS)
         payload = fields.except(*RECORD_KEYS)
 
-        unless payload.empty?
-          record[:payload] = Julewire::Core::Fields::FieldSet.merge(payload_hash(record[:payload]), payload)
-        end
+        record[:payload] = Julewire::Core::Fields::FieldSet.merge(payload_hash(record[:payload]), payload)
         record
       end
 
       def payload_hash(payload)
         return {} if payload.nil?
-        return payload if payload.is_a?(Hash)
+        return payload if payload.instance_of?(Hash)
 
         { Julewire::Core::Fields::FieldSet::VALUE_KEY => payload }
       end
 
       def merge_current_tags(record)
-        current_tags = formatter.respond_to?(:current_tags) ? formatter.current_tags : nil
+        current_tags = formatter.current_tags if formatter.respond_to?(:current_tags)
         return record if current_tags.nil? || current_tags.empty?
 
-        attributes = record[:attributes].is_a?(Hash) ? record[:attributes] : {}
-        rails = attributes[:rails].is_a?(Hash) ? attributes[:rails] : {}
-        rails[:tags] = Julewire::Core::Fields::FieldSet.deep_dup(current_tags)
-        attributes[:rails] = rails
-        record[:attributes] = attributes
+        record[:attributes] = {
+          rails: { tags: current_tags }
+        }
         record
       end
     end

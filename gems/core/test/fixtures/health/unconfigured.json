@@ -27,6 +27,7 @@
       "no_output_dropped": 0,
       "processor_dropped": 0,
       "processor_error": 0,
+      "processor_invalid": 0,
       "failures": 0
     },
     "destinations": {},

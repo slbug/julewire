@@ -9,41 +9,53 @@ module Julewire
       config.julewire_rails = Configuration.new
 
       initializer "julewire_rails.logger", before: :initialize_logger do |app|
-        settings = app.config.julewire_rails
-        settings.validate!
-        next unless settings.logger?
-
-        logger = Logger.new(name: settings.logger_name, source: settings.source)
-        logger.level = ::Logger::Severity.const_get(app.config.log_level.to_s.upcase)
-        logger.formatter = app.config.log_formatter if app.config.respond_to?(:log_formatter)
-        app.config.logger = ::ActiveSupport::TaggedLogging.new(logger)
-        LoggerOutputs.install!
+        Railtie.initialize_logger!(app)
       end
 
       initializer "julewire_rails.request_middleware", before: :build_middleware_stack do |app|
-        settings = app.config.julewire_rails
-        settings.validate!
-        next unless settings.request_middleware?
-
-        self.class.install_request_middleware(app, settings, app.config.log_tags)
+        Railtie.initialize_request_middleware!(app)
       end
 
       initializer "julewire_rails.exception_logging", before: :build_middleware_stack do |app|
-        settings = app.config.julewire_rails
-        settings.validate!
-        self.class.configure_exception_logging(app, settings)
+        Railtie.initialize_exception_logging!(app)
       end
 
       config.after_initialize do |app|
-        settings = app.config.julewire_rails
-        settings.validate!
-        OutputRequirement.check!(settings)
-        LifecycleHooks.install!(settings)
-        Railtie.install_subscribers(settings)
-        DebugExceptionLogSilencer.install!(settings)
+        Railtie.finish_initialization!(app)
       end
 
       class << self
+        def initialize_logger!(app)
+          settings = validated_settings(app)
+          return unless settings.logger?
+
+          logger = Logger.new(name: settings.logger_name, source: settings.source)
+          logger.level = app.config.log_level
+          logger.formatter = app.config.log_formatter
+          app.config.logger = ::ActiveSupport::TaggedLogging.new(logger)
+          LoggerOutputs.install!
+        end
+
+        def initialize_request_middleware!(app)
+          settings = validated_settings(app)
+          return unless settings.request_middleware?
+
+          install_request_middleware(app, settings, app.config.log_tags)
+        end
+
+        def initialize_exception_logging!(app)
+          settings = validated_settings(app)
+          configure_exception_logging(app, settings)
+        end
+
+        def finish_initialization!(app)
+          settings = validated_settings(app)
+          OutputRequirement.check!(settings)
+          LifecycleHooks.install!(settings)
+          install_subscribers(settings)
+          DebugExceptionLogSilencer.install!(settings)
+        end
+
         def install_subscribers(settings)
           Subscribers::ControllerResponse.install!(settings)
           settings.error_reports? ? Subscribers::Error.install!(settings) : Subscribers::Error.reset!
@@ -70,13 +82,15 @@ module Julewire
         end
 
         def log_rescued_responses_value(settings)
-          if settings.log_rescued_responses == :auto
-            return false if settings.logger? && settings.request_summary?
+          return settings.log_rescued_responses unless settings.log_rescued_responses == :auto
 
-            return
-          end
+          false if settings.logger? && settings.request_summary?
+        end
 
-          settings.log_rescued_responses
+        private
+
+        def validated_settings(app)
+          app.config.julewire_rails.tap(&:validate!)
         end
       end
     end

@@ -7,8 +7,12 @@ module Julewire
         private
 
         def parse_command_options(options, command:)
-          yield(options, @argv.shift) until @argv.empty?
-          raise ArgumentError, "#{command} log path is required" unless options[:path]
+          @argv.length.times do
+            break if @argv.empty?
+
+            yield(options, @argv.shift)
+          end
+          raise ArgumentError, "#{command} log path is required" unless options.fetch(:path)
 
           options
         end
@@ -24,26 +28,33 @@ module Julewire
           value = @argv.shift
           raise ArgumentError, "#{name} value is required" unless value
 
-          Validation.validate_integer_limit!(Integer(value, 10), name: name.delete_prefix("--"), positive: true)
-        rescue ArgumentError
-          raise ArgumentError, "#{name} must be a positive integer"
+          begin
+            integer = Integer(value, 10)
+            raise ArgumentError unless integer.positive?
+
+            integer
+          rescue ArgumentError
+            raise ArgumentError, "#{name} must be a positive integer"
+          end
         end
 
         def apply_path_option(options, value, command:)
-          raise ArgumentError, "unknown option #{value}" if value.start_with?("-") && value != "-"
-          raise ArgumentError, "#{command} accepts one log path" if options[:path]
+          raise ArgumentError, "unknown option #{value}" if value.start_with?("-") && !value.eql?("-")
+          raise ArgumentError, "#{command} accepts one log path" if options.fetch(:path)
 
           options[:path] = value
         end
 
-        def handle_invalid_line(line, error, mode)
+        def handle_invalid_line(line, mode)
           case mode
           when :skip
             nil
           when :raw
             @stdout.write(raw_line(line))
+          when :fail
+            raise
           else
-            raise error
+            raise ArgumentError, "invalid line policy must be fail, raw, or skip"
           end
         end
 
@@ -53,7 +64,7 @@ module Julewire
 
         def indexed_lines(lines)
           lines.each_with_index.filter_map do |line, index|
-            [index + 1, line] unless line.strip.empty?
+            [index + 1, line] if line.match?(/\S/)
           end
         end
 
@@ -68,8 +79,8 @@ module Julewire
         def write_encoded_record_line(line, line_number, input_format:, invalid:, encoder:)
           record = LogFormats.record_from_json_line(line, line_number: line_number, format: input_format)
           @stdout.write(encoder.call(record))
-        rescue ArgumentError => e
-          handle_invalid_line(line, e, invalid)
+        rescue ArgumentError
+          handle_invalid_line(line, invalid)
         end
       end
     end

@@ -38,8 +38,9 @@ These defaults are intended for a normal Rails app:
 | `filter_event_payloads` | `true` | Filter serialized object-event hashes with Rails parameter filters. |
 | `rendered_exceptions` | `false` | Emit diagnostic rendered-exception point records in addition to summaries. |
 
-Broad header capture (`*.headers = true`) skips common sensitive headers.
-Explicit header lists are authoritative.
+Broad header capture (`*.headers = true`) skips common sensitive headers but is
+still a debugging shape. Production configs should prefer explicit header
+lists.
 
 `structured_event_prefixes = nil` accepts all structured-event names. Use it
 only when the app wants Julewire to consider every Rails event.

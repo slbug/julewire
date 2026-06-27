@@ -45,8 +45,6 @@ module Julewire
 
             fields.compact
           end
-
-          def from(neutral) = neutral.is_a?(Hash) ? neutral : {}
         end
       end
     end

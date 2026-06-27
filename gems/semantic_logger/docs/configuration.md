@@ -39,6 +39,12 @@ At least one appender target is required.
 | `appenders:` | none | Array of appender specs. |
 | `async:` | `false` | Wrap the sink in `SemanticLogger::Appender::Async`. |
 | `max_queue_size:` | `10_000` | Async queue size. `-1` means unbounded in Semantic Logger. |
+| `batch:` | `nil` | Use Semantic Logger batch async processing when supported by the appender. `true` implies async output. |
+| `batch_size:` | `300` | Batch size for batch-capable async appenders. |
+| `batch_seconds:` | `5` | Maximum seconds between batch writes. |
+| `non_blocking:` | `false` | Semantic Logger 5+ async drop mode. Raises on older Semantic Logger when set to a non-default value. |
+| `dropped_message_report_seconds:` | `30` | Semantic Logger 5+ dropped-message report interval. Raises on older Semantic Logger when set to a non-default value. |
+| `async_max_retries:` | `100` | Semantic Logger 5+ async worker retry limit. Raises on older Semantic Logger when set to a non-default value. |
 
 Unknown transport options are passed to Semantic Logger appender construction.
 

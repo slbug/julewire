@@ -60,53 +60,18 @@ general application surface:
 - `Julewire::TailSampling` as a destination wrapper for execution-level tail
   sampling.
 - `Julewire::Testing::CaptureDestination`, `Julewire::Testing::NullOutput`,
-  `Julewire::Testing.capture`, `Julewire::Testing.configure_capture_destination`,
-  `Julewire::Testing::Contracts`, `Julewire::Testing::Chaos`, and
-  `Julewire::Testing::Coverage` as extension test support.
+  `Julewire::Testing.capture`, and
+  `Julewire::Testing.configure_capture_destination` as small extension test
+  fixtures.
 - `RuntimeLocator.current.emit_without_level` for host-process integrations
   that already apply their framework's level gate.
 
 Extensions should consume these contracts rather than reaching into pipeline,
 runtime, storage, or destination internals.
 
-Testing support is shipped for integration authors, but helper names may still
-change when the ecosystem cleanup demands it.
-
-`Julewire::Testing::Contracts` currently ships these shared assertions for
-extension and integration gems:
-
-- `assert_julewire_bounded_transform_spi_contract`
-- `assert_julewire_deadline_scheduler_spi_contract`
-- `assert_julewire_destination_contract`
-- `assert_julewire_execution_boundary_contract`
-- `assert_julewire_failure_containment_contract`
-- `assert_julewire_formatter_contract`
-- `assert_julewire_integration_failure_contract`
-- `assert_julewire_integration_health_contract`
-- `assert_julewire_integration_ivar_state_contract`
-- `assert_julewire_integration_payload_contract`
-- `assert_julewire_integration_spi_contract`
-- `assert_julewire_integration_timestamp_contract`
-- `assert_julewire_integration_value_contract`
-- `assert_julewire_processor_contract`
-- `assert_julewire_propagation_contract`
-- `assert_julewire_record_draft_transform_contract`
-- `assert_julewire_record_shape_contract`
-- `assert_julewire_record_source_contract`
-- `assert_julewire_runtime_integration_contract`
-- `assert_julewire_truncation_marker_spi_contract`
-- `assert_julewire_validation_spi_contract`
-
-`Julewire::Testing::Chaos` currently ships containment helpers for extension
-test suites:
-
-- `assert_contained`
-- `assert_core_runtime_containment`
-- `assert_destination_chaos_contract`
-- `assert_discovered_chaos_contracts`
-- `assert_emitter_chaos_contract`
-- `catalog`
-- `raiser`
+Core does not ship an assertion DSL or exception-corpus runner. Integration
+tests exercise their production formatter, destination, processor, subscriber,
+and framework boundary directly.
 
 ## Integration SPI
 
@@ -118,6 +83,8 @@ but they are not intended as general application API:
   integration health and scoped health wrappers.
 - `Julewire::Core::Integration::Facade` for integration-owned emits,
   execution boundaries, field overlays, and summary enrichment.
+- `Julewire::Core::Integration::Protocol` for recursive, non-normalizing
+  validation of Symbol-keyed integration protocol data.
 - `Julewire::Core::Integration::Values::Read` for hash/object value reads
   including `value`, `hash_value`, `nested_value`, `path_value`,
   `first_value`, and `blank?`.
@@ -133,7 +100,10 @@ but they are not intended as general application API:
   snapshots without exposing core's internal health cells.
 - `Julewire::Core::Destinations::WriteStep` for destination-style integrations
   that reuse core's format, encode, bound, write, and counter sequence while
-  keeping their own lifecycle and failure policy.
+  keeping their own lifecycle and failure policy. It returns `true` only when
+  the output accepted the encoded record; handled drops and transform failures
+  return `false` after recording health/loss metadata through the supplied
+  callbacks.
 - `Julewire::Core::CLI::LogFormats` for provider-owned CLI file-tail decoding
   and transcoding formats.
 - `Julewire::Core::Processing.register` for integration-owned processor kinds,
@@ -148,14 +118,13 @@ but they are not intended as general application API:
 - `Julewire::Core.sentinel(:name)` for readable, frozen identity markers when
   an integration needs a private empty or missing-value sentinel.
 - `Julewire::Core.deep_compact_empty` for core-compatible empty-field pruning.
-- `Julewire::Core::Scheduling::DeadlineScheduler` for integration-local timeout callbacks
-  that need Julewire's fork-reset behavior.
 - `Julewire::Core::Scheduling::SharedScheduler` for process-wide main-ractor
   timeouts shared by integrations that should not own separate scheduler
   threads.
 - `Julewire::Core::Validation` for shared option and limit validation.
-- `Julewire::Core::Serialization::BoundedTransform` for processors and integrations that need
-  core-compatible bounded traversal before core serializes the result.
+- `Julewire::Core::Serialization::BoundedTransform.call` for processors and
+  integrations that need core-compatible bounded traversal before core
+  serializes the result.
 - `Julewire::Core::Diagnostics::CallbackNotifier` and
   `Julewire::Core::Diagnostics::FailureSnapshot` for destination-style
   integrations that need core-compatible callback and health failure shape.
@@ -181,6 +150,8 @@ different Ruby isolation boundary:
 - `Julewire::Core::UNSET`, `Julewire::Core.emit_input`, and
   `Julewire::Core::Records::LazyEmitInput` to mirror facade emit semantics
   across an isolation boundary.
+- `Julewire::Core::Records::BuildInput` to canonicalize public emit fields or
+  validate integration-owned record input before strict bridge serialization.
 - `Julewire::Core::Execution::Boundary` for shared execution boundary behavior.
 - `Julewire::Core::ContextStore.current`,
   `Julewire::Core::Fields::ContextProxy`,
@@ -188,14 +159,17 @@ different Ruby isolation boundary:
   `Julewire::Core::Fields::CarryProxy`, and
   `Julewire::Core::Fields::SummaryProxy` for bridge-local field bags.
 - `Julewire::Core::Execution::ScopeSnapshot` for detached execution scope transfer.
+- `emit_integration(record, enforce_level:)` on bridge runtimes for strict
+  integration-owned emits inside the isolation boundary.
 - Parent-runtime hooks: `emit_envelope`, `emit_summary_record`, and `flush`.
   `emit_envelope` accepts detached input, context, carry, attributes, neutral,
   scope snapshot, `enforce_level:`, and `owned:`. Bridges pass `owned: true`
   only for envelopes that came from Julewire's own wire format.
 
-Bridge runtimes may expose `emit_without_level` when integration code inside
-the bridge has already applied its own level gate. Parent runtime labels,
-processors, destinations, and outputs remain parent-owned.
+Bridge runtimes may expose `emit_without_level` for public bridge-local callers
+that already applied a level gate. Integration code uses `emit_integration` so
+owned data never falls back through public normalization. Parent runtime
+labels, processors, destinations, and outputs remain parent-owned.
 
 ## Internal implementation
 

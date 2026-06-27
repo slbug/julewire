@@ -6,7 +6,9 @@ require "stringio"
 
 module Julewire
   class TestCarry < Minitest::Test
-    cover Julewire::Core::Fields::FieldStack
+    cover "Julewire.carry"
+    cover "Julewire::Core::FacadeMethods#carry"
+    cover "Julewire::Core::Execution::Scope#without_carry"
 
     def test_carry_add_is_available_to_formatters_but_omitted_from_default_logs
       records = capture_julewire_records { emit_with_carry }
@@ -20,8 +22,8 @@ module Julewire
       point = JSON.parse(output.string.lines.first)
       summary = JSON.parse(output.string.lines.last)
 
-      refute point.key?("carry")
-      refute summary.key?("carry")
+      assert_false point.key?("carry")
+      assert_false summary.key?("carry")
     end
 
     def test_carry_with_cleans_up_after_the_block
@@ -50,7 +52,7 @@ module Julewire
       Julewire.carry.delete(:http, :request_headers, :authorization)
 
       assert_equal "trace-1", Julewire.carry.to_h.dig(:http, :request_headers, :traceparent)
-      refute Julewire.carry.to_h.dig(:http, :request_headers).key?(:authorization)
+      assert_false Julewire.carry.to_h.dig(:http, :request_headers).key?(:authorization)
     end
 
     def test_persistent_carry_delete_masks_scoped_with_overlay_until_added_back
@@ -66,7 +68,7 @@ module Julewire
       ) do
         inside = Julewire.carry.to_h
 
-        refute inside.dig(:http, :request_headers).key?(:authorization)
+        assert_false inside.dig(:http, :request_headers).key?(:authorization)
         assert_equal "trace-1", inside.dig(:http, :request_headers, :traceparent)
       end
 
@@ -87,6 +89,16 @@ module Julewire
       assert_equal "trace-1", Julewire.carry.to_h.dig(:http, :request_headers, :traceparent)
     end
 
+    def test_carry_without_requires_path
+      error = assert_raises(ArgumentError) do
+        Julewire.with_execution(type: :request, emit_summary: false) do
+          Julewire.carry.without([]) { flunk "should not run" }
+        end
+      end
+
+      assert_equal "carry path is required", error.message
+    end
+
     def test_carry_delete_inside_execution_masks_fields_for_formatters
       records = capture_julewire_records do
         emit_with_authorization_removed
@@ -96,8 +108,8 @@ module Julewire
       summary = records.last
 
       assert_equal "trace-1", point.dig(:carry, :http, :request_headers, :traceparent)
-      refute point.dig(:carry, :http, :request_headers).key?(:authorization)
-      refute summary.dig(:carry, :http, :request_headers).key?(:authorization)
+      assert_false point.dig(:carry, :http, :request_headers).key?(:authorization)
+      assert_false summary.dig(:carry, :http, :request_headers).key?(:authorization)
     end
 
     def test_record_formatter_omits_carry_by_default
@@ -105,7 +117,7 @@ module Julewire
         Julewire::Core::Serialization::JsonEncoder.new.call(Julewire::Core::Records::Formatter.new.call(record_with_carry))
       )
 
-      refute formatted.key?("carry")
+      assert_false formatted.key?("carry")
     end
 
     def test_carry_delete_inside_execution_is_omitted_from_default_logs
@@ -117,8 +129,8 @@ module Julewire
       point = JSON.parse(output.string.lines.first)
       summary = JSON.parse(output.string.lines.last)
 
-      refute point.key?("carry")
-      refute summary.key?("carry")
+      assert_false point.key?("carry")
+      assert_false summary.key?("carry")
     end
 
     private

@@ -60,8 +60,7 @@ end
 
 desc "Run Flay duplicate code analysis"
 task :flay do
-  test_files = Dir["test/**/*.rb"].reject { it.start_with?("test/tmp/") }
-  ruby_exec("flay", "flay", ["lib", *test_files])
+  ruby_exec("flay", "flay", %w[lib test])
 end
 
 desc "Run Debride unused code analysis"

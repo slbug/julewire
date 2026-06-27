@@ -4,6 +4,9 @@ require "test_helper"
 
 module Julewire
   class TestExecutionExceptionAttribution < Minitest::Test
+    cover Julewire::Core::Execution::Handle
+    cover "Julewire::Core::ContextStore#with_execution"
+    cover "Julewire::Core::Runtime#with_execution"
     def test_with_execution_inside_rescue_does_not_record_outer_exception
       records = capture_julewire_records do
         inside_rescue do

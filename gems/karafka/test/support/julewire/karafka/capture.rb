@@ -1,14 +1,12 @@
 # frozen_string_literal: true
 
 module JulewireCapture
-  include Julewire::Core::Testing::Contracts
-
   def reset_julewire!
     Julewire.reset!
   end
 
   def capture_records
-    Julewire::Core::Testing.capture
+    Julewire::Testing.capture
   end
 
   def consumer_listener
@@ -95,16 +93,9 @@ module JulewireCapture
   end
 
   def assert_karafka_source_contract(record, event:, logger:)
-    assert_julewire_record_source_contract(
-      records: [record],
-      event: event,
-      source: "karafka",
-      logger: logger,
-      kind: "point",
-      event_path: %i[event],
-      source_path: %i[source],
-      logger_path: %i[logger],
-      kind_path: %i[kind]
-    )
+    assert_equal event, record.fetch(:event)
+    assert_equal "karafka", record.fetch(:source)
+    assert_equal logger, record.fetch(:logger)
+    assert_equal :point, record.fetch(:kind)
   end
 end

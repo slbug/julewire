@@ -7,7 +7,9 @@ module Julewire
 
       def initialize(destinations:, name: :ractor_fanout, on_failure: nil)
         @name = Core::Destinations.normalize_name(name)
-        @destinations = Array(destinations).map { normalize_destination(it) }.freeze
+        raise ArgumentError, "destinations must be an Array" unless destinations.instance_of?(Array)
+
+        @destinations = destinations.map { normalize_destination(it) }
         raise ArgumentError, "destinations must not be empty" if @destinations.empty?
 
         Core::Validation.validate_callable!(on_failure, name: :on_failure, allow_nil: true)
@@ -16,7 +18,9 @@ module Julewire
       end
 
       def emit(record)
-        @destinations.each { emit_to_destination(it, record) }
+        @health.recover_if_successful do
+          @destinations.each { emit_to_destination(it, record) }
+        end
         nil
       end
 
@@ -29,10 +33,12 @@ module Julewire
       end
 
       def after_fork!
-        @destinations.each do |destination|
-          destination.after_fork! if destination.respond_to?(:after_fork!)
-        rescue StandardError => e
-          record_failure(e, action: :after_fork, destination: destination.name)
+        @health.recover_if_successful do
+          @destinations.each do |destination|
+            destination.after_fork! if destination.respond_to?(:after_fork!)
+          rescue StandardError => e
+            record_failure(e, action: :after_fork, destination: destination.name)
+          end
         end
         self
       end
@@ -61,14 +67,16 @@ module Julewire
       end
 
       def call_lifecycle(method_name, timeout:)
-        ok = true
-        @destinations.each do |destination|
-          ok = false if destination.public_send(method_name, timeout: timeout) == false
-        rescue StandardError => e
-          record_failure(e, action: method_name, destination: destination.name)
-          ok = false
+        @health.recover_if_successful do
+          ok = true
+          @destinations.each do |destination|
+            ok = false if destination.public_send(method_name, timeout: timeout) == false
+          rescue StandardError => e
+            record_failure(e, action: method_name, destination: destination.name)
+            ok = false
+          end
+          ok
         end
-        ok
       end
 
       def destination_health(destination)
@@ -78,17 +86,16 @@ module Julewire
       end
 
       def health_status(destinations)
-        return :degraded if @health.last_failure
-        return :degraded if destinations.any? { |_name, health| health[:status] == :degraded || health[:phase] }
-
-        :ok
+        :degraded if destinations.any? { |_name, health| health[:status] == :degraded || health[:phase] }
       end
 
       def record_failure(error, **metadata)
-        @health.record_failure(error, counter: nil, phase: :ractor_fanout, **metadata)
-        @on_failure&.call(error, **metadata, phase: :ractor_fanout)
-      rescue StandardError
-        nil
+        @health.record_failure(error, phase: :ractor_fanout, **metadata)
+        callback_result = Core::Diagnostics::CallbackNotifier.call(@on_failure, error,
+                                                                   metadata.merge(phase: :ractor_fanout))
+        return unless Core::Diagnostics::CallbackNotifier.failure?(callback_result)
+
+        @health.record_callback_failure(callback_result)
       end
     end
   end

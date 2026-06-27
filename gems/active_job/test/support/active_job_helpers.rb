@@ -2,36 +2,14 @@
 
 module Julewire
   module ActiveJobHelpers
+    include Julewire::TestSupport::MethodOverride
+
     def fake_job
       ActiveJobFixtures::FakeJob.new
     end
 
     def active_job_attributes(record)
       record.dig(:attributes, :active_job) || {}
-    end
-
-    def assert_other_event_record(record)
-      assert_equal "other.event", record.fetch(:event)
-    end
-
-    def assert_source_location_attributes(record)
-      assert_equal "app/jobs/import_job.rb", record.dig(:neutral, :"code.file.path")
-      assert_equal 42, record.dig(:neutral, :"code.line.number")
-      assert_equal "ImportJob#perform", record.dig(:neutral, :"code.function.name")
-    end
-
-    def assert_active_job_record_contract(record)
-      assert_julewire_record_source_contract(
-        records: [record],
-        event: "other.event",
-        source: "active_job",
-        logger: "ActiveJob.event",
-        kind: "point",
-        event_path: %i[event],
-        source_path: %i[source],
-        logger_path: %i[logger],
-        kind_path: %i[kind]
-      )
     end
 
     def real_active_job_configuration
@@ -86,30 +64,6 @@ module Julewire
       assert_includes events, "active_job.started"
       assert_includes events, "active_job.completed"
       assert_includes events, "active_job.enqueued"
-    end
-
-    def exercise_active_job_contract(emit_point:, add_summary:, context:, carry:, summary_event:, **)
-      job = fake_job
-      job.instance_variable_set(:@julewire_carrier, contract_carrier(context: context, carry: carry))
-      configuration = Julewire::ActiveJob::Configuration.new
-      configuration.summary_event = summary_event
-
-      Julewire::ActiveJob::JobExecution.call(job, configuration: configuration) do
-        add_summary.call
-        emit_point.call
-      end
-    end
-
-    def contract_carrier(context:, carry:)
-      Julewire.with_execution(type: :producer, id: "producer-1", emit_summary: false) do
-        Julewire.context.add(context)
-        Julewire.carry.add(carry)
-        Julewire::Core::Propagation::Carrier.inject({})
-      end
-    end
-
-    def with_overridden_singleton_method(receiver, method_name, replacement, &)
-      Julewire::Core::Testing.with_overridden_singleton_method(receiver, method_name, replacement, &)
     end
   end
 end

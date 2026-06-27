@@ -28,7 +28,8 @@ module Julewire
           env: env,
           request: request,
           taggers: @taggers
-        ).start
+        )
+        lifecycle.start
         request_context = RequestContext.new(configuration: @configuration, request: request)
 
         response = request_context.call do
@@ -61,7 +62,7 @@ module Julewire
       def call_app(request, env, execution_handle)
         status, headers, body = @app.call(env)
         add_summary_fields(response_summary_attributes(request, status, headers))
-        capture_rendered_request_error(request, env, status)
+        capture_rendered_request_error(request, env)
         [status, headers, body]
       rescue Exception => e # rubocop:disable Lint/RescueException -- Rack middleware must re-raise all application exits.
         severity = request_exception_severity(request)
@@ -76,11 +77,11 @@ module Julewire
         RequestAttributes.response_summary(request, status, headers)
       end
 
-      def capture_rendered_request_error(request, env, status)
+      def capture_rendered_request_error(request, env)
         rendered_error = env[RENDERED_EXCEPTION_ENV_KEY]
         if rendered_error
           own_request_error(env, rendered_error.fetch(:error), severity: rendered_error.fetch(:severity))
-          add_summary_fields(rendered_error_summary_attributes(request, rendered_error, status: status))
+          add_summary_fields(rendered_error_summary_attributes(rendered_error))
           return
         end
 
@@ -90,7 +91,7 @@ module Julewire
         severity = request_exception_severity(request)
         wrapper = exception_wrapper(request, error)
         own_request_error(env, error, severity: severity)
-        add_summary_fields(error_summary_attributes(request, error, status: status, wrapper: wrapper))
+        add_summary_fields(error_response_attributes(error, wrapper: wrapper))
       end
 
       def own_request_error(env, error, severity:)
@@ -100,12 +101,12 @@ module Julewire
         RequestErrorOwnership.mark(error)
       end
 
-      def rendered_error_summary_attributes(request, rendered_error, status:)
-        RequestAttributes.rendered_error_summary(
-          request,
-          rendered_error,
-          status: status
-        )
+      def rendered_error_summary_attributes(rendered_error)
+        RequestAttributes.rendered_error_details(rendered_error)
+      end
+
+      def error_response_attributes(error, wrapper:)
+        RequestAttributes.error_details(error, wrapper: wrapper)
       end
 
       def error_summary_attributes(request, error, status:, wrapper:)
@@ -122,8 +123,8 @@ module Julewire
       end
 
       def add_summary_fields(fields)
-        Core::Integration::Facade.add_summary_attributes(fields[:attributes])
-        Core::Integration::Facade.add_summary_neutral(fields[:neutral])
+        Julewire::Core::Integration::Facade.add_summary_attributes(fields.fetch(:attributes))
+        Julewire::Core::Integration::Facade.add_summary_neutral(fields.fetch(:neutral))
       end
     end
   end

@@ -27,23 +27,21 @@ module Julewire
         private
 
         def compact_value!(value)
-          return compact_hash!(value) if value.is_a?(Hash)
-          return compact_array!(value) if value.is_a?(Array)
-
-          value
+          if value.is_a?(Hash)
+            compact_hash!(value)
+          elsif value.is_a?(Array)
+            compact_array!(value)
+          else
+            value
+          end
         end
 
         def compact_hash!(value)
           with_traversal_container(value, value) do
             value.each do |key, item|
               compacted = compact_value!(item)
-              if self.class.omitted?(compacted)
-                value.delete(key)
-              elsif !compacted.equal?(item)
-                value[key] = compacted
-              end
+              value.delete(key) if self.class.omitted?(compacted)
             end
-            value
           end
         end
 
@@ -57,7 +55,7 @@ module Julewire
               value[index] = compacted
               index += 1
             end
-            value.slice!(index, value.length - index) if index < value.length
+            value.slice!(index, value.length)
             value
           end
         end

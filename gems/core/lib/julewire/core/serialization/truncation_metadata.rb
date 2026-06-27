@@ -4,39 +4,41 @@ module Julewire
   module Core
     module Serialization
       module TruncationMetadata
+        NAMES = %i[truncated truncated_fields limits max_array_items max_depth max_hash_keys max_string_bytes].freeze
         KEYS = {
-          string: {
-            truncated: "truncated",
-            truncated_fields: "truncated_fields",
-            limits: "limits",
-            max_array_items: "max_array_items",
-            max_depth: "max_depth",
-            max_hash_keys: "max_hash_keys",
-            max_string_bytes: "max_string_bytes"
-          }.freeze,
-          symbol: {
-            truncated: :truncated,
-            truncated_fields: :truncated_fields,
-            limits: :limits,
-            max_array_items: :max_array_items,
-            max_depth: :max_depth,
-            max_hash_keys: :max_hash_keys,
-            max_string_bytes: :max_string_bytes
-          }.freeze
+          string: NAMES.to_h { [it, it.to_s] }.freeze,
+          symbol: NAMES.to_h { [it, it] }.freeze
         }.freeze
         METADATA_KEYS = KEYS.fetch(:symbol).values_at(:truncated, :truncated_fields, :limits).freeze
-        METADATA_KEY_NAMES = METADATA_KEYS.map(&:to_s).freeze
+        METADATA_KEY_NAMES = KEYS.fetch(:string).values_at(:truncated, :truncated_fields, :limits).freeze
         LIMIT_KEYS = KEYS.fetch(:symbol).values_at(
           :max_array_items,
           :max_depth,
           :max_hash_keys,
           :max_string_bytes
         ).freeze
-        LIMIT_KEY_NAMES = LIMIT_KEYS.map(&:to_s).freeze
-        [KEYS, METADATA_KEYS, METADATA_KEY_NAMES, LIMIT_KEYS, LIMIT_KEY_NAMES].each do |constant|
+        LIMIT_KEY_NAMES = KEYS.fetch(:string).values_at(
+          :max_array_items,
+          :max_depth,
+          :max_hash_keys,
+          :max_string_bytes
+        ).freeze
+        SYMBOL_METADATA_KEYS = KEYS.fetch(:symbol).merge(limit_keys: LIMIT_KEYS).freeze
+        STRING_METADATA_KEYS = KEYS.fetch(:string).merge(limit_keys: LIMIT_KEY_NAMES).freeze
+        [
+          NAMES,
+          KEYS,
+          METADATA_KEYS,
+          METADATA_KEY_NAMES,
+          LIMIT_KEYS,
+          LIMIT_KEY_NAMES,
+          SYMBOL_METADATA_KEYS,
+          STRING_METADATA_KEYS
+        ].each do |constant|
           ::Ractor.make_shareable(constant) if defined?(::Ractor) && ::Ractor.respond_to?(:make_shareable)
         end
-        private_constant :KEYS, :METADATA_KEYS, :METADATA_KEY_NAMES, :LIMIT_KEYS, :LIMIT_KEY_NAMES
+        private_constant :NAMES, :KEYS, :METADATA_KEYS, :METADATA_KEY_NAMES, :LIMIT_KEYS, :LIMIT_KEY_NAMES,
+                         :SYMBOL_METADATA_KEYS, :STRING_METADATA_KEYS
 
         class << self
           def build(fields, max_array_items:, max_depth:, max_hash_keys:, max_string_bytes:, key_style: :string,
@@ -66,12 +68,25 @@ module Julewire
 
           def valid?(value, max_fields: nil)
             return false unless value.is_a?(Hash)
-            return false unless valid_top_level_keys?(value)
-            return false unless fetch_key(value, :truncated) == true
 
-            fields = fetch_key(value, :truncated_fields)
-            limits = fetch_key(value, :limits)
-            valid_fields?(fields, max_fields: max_fields) && valid_limits?(limits)
+            keys = metadata_keys(value)
+            return false unless keys
+            return false unless value.fetch(keys.fetch(:truncated)) == true
+
+            valid_fields?(value.fetch(keys.fetch(:truncated_fields)), max_fields: max_fields) &&
+              valid_limits?(value.fetch(keys.fetch(:limits)), limit_keys: keys.fetch(:limit_keys))
+          end
+
+          def copy(value, freeze_values:, key_style: :symbol)
+            source_keys = metadata_keys(value)
+            target_keys = KEYS.fetch(key_style)
+            metadata = {
+              target_keys.fetch(:truncated) => true,
+              target_keys.fetch(:truncated_fields) => copy_fields(value.fetch(source_keys.fetch(:truncated_fields))),
+              target_keys.fetch(:limits) => copy_limits(value.fetch(source_keys.fetch(:limits)), source_keys,
+                                                        target_keys)
+            }
+            freeze_values ? deep_freeze(metadata, target_keys) : metadata
           end
 
           private
@@ -97,42 +112,42 @@ module Julewire
             metadata.freeze
           end
 
-          def fetch_key(value, key)
-            return value[key] if value.key?(key)
-
-            value[key.to_s]
+          def copy_fields(fields)
+            fields.map(&:dup)
           end
 
-          def valid_top_level_keys?(value)
-            return false if value.length > METADATA_KEYS.length * 2
+          def copy_limits(limits, source_keys, target_keys)
+            LIMIT_KEYS.each_with_object({}) do |name, copied|
+              source_key = source_keys.fetch(name)
+              next unless limits.key?(source_key)
 
-            value.keys.all? { known_key?(it, METADATA_KEYS, METADATA_KEY_NAMES) } &&
-              METADATA_KEYS.all? { value.key?(it) || value.key?(it.to_s) }
+              copied[target_keys.fetch(name)] = limits.fetch(source_key)
+            end
+          end
+
+          def metadata_keys(value)
+            return SYMBOL_METADATA_KEYS if exact_keys?(value, METADATA_KEYS)
+
+            STRING_METADATA_KEYS if exact_keys?(value, METADATA_KEY_NAMES)
+          end
+
+          def exact_keys?(value, keys)
+            value.length == keys.length && keys.all? { value.key?(it) }
           end
 
           def valid_fields?(fields, max_fields:)
             return false unless fields.is_a?(Array)
+            return false if max_fields && fields.length > max_fields
 
-            seen = 0
-            fields.each do |field|
-              seen += 1
-              return false if max_fields && seen > max_fields
-              return false unless field.is_a?(String) || field.is_a?(Symbol)
-            end
-            true
+            fields.all?(String)
           end
 
-          def valid_limits?(limits)
+          def valid_limits?(limits, limit_keys:)
             return false unless limits.is_a?(Hash)
-            return false if limits.length > LIMIT_KEYS.length * 2
 
             limits.all? do |key, value|
-              known_key?(key, LIMIT_KEYS, LIMIT_KEY_NAMES) && (value.nil? || value.is_a?(Integer))
+              limit_keys.include?(key) && (value.nil? || value.instance_of?(Integer))
             end
-          end
-
-          def known_key?(key, symbol_keys, string_keys)
-            symbol_keys.include?(key) || string_keys.include?(key)
           end
         end
       end

@@ -5,7 +5,7 @@ require "test_helper"
 module Julewire
   class TestEventSubscriberFiltering < Minitest::Test
     cover Julewire::Rails::Subscribers::Event
-
+    cover Julewire::Rails::Suppression
     def test_event_subscriber_defaults_to_useful_framework_events_without_view_chatter
       subscriber = Julewire::Rails::Subscribers::Event.new
 
@@ -47,6 +47,39 @@ module Julewire
       )
     end
 
+    def test_event_subscriber_filter_config_accepts_scalar_values
+      subscriber = event_subscriber(
+        structured_event_names: "custom.allowed",
+        structured_event_prefixes: "custom.",
+        structured_event_exclude_names: "custom.blocked",
+        structured_event_exclude_prefixes: "secret."
+      )
+
+      assert_event_filter(
+        subscriber,
+        accepts: ["custom.allowed", "custom.other"],
+        rejects: ["custom.blocked", "secret.event", "other.event"]
+      )
+    end
+
+    def test_event_subscriber_rejects_while_suppressed
+      subscriber = event_subscriber(structured_event_prefixes: nil)
+
+      Julewire::Rails::Suppression.suppress do
+        assert_false subscriber.accept?(name: "custom.event")
+      end
+    end
+
+    def test_event_subscriber_accepts_loose_event_name_objects
+      subscriber = event_subscriber(structured_event_prefixes: "custom.")
+      name = Object.new
+      name.define_singleton_method(:to_s) { "custom.event" }
+      event = Object.new
+      event.define_singleton_method(:[]) { |key| key == :name ? name : nil }
+
+      assert_true subscriber.accept?(event)
+    end
+
     def test_event_subscriber_caches_payload_filter_until_subscriber_configuration_changes
       output = configure_output
       subscriber = Julewire::Rails::Subscribers::Event.new
@@ -74,8 +107,8 @@ module Julewire
     private
 
     def assert_event_filter(subscriber, accepts:, rejects:)
-      accepts.each { |name| assert subscriber.accept?(name: name), "expected #{name.inspect} to be accepted" }
-      rejects.each { |name| refute subscriber.accept?(name: name), "expected #{name.inspect} to be rejected" }
+      accepts.each { |name| assert_true subscriber.accept?(name: name), "expected #{name.inspect} to be accepted" }
+      rejects.each { |name| assert_false subscriber.accept?(name: name), "expected #{name.inspect} to be rejected" }
     end
 
     def event_subscriber(**settings)

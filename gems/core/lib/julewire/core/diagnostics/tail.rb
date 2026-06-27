@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_reference"
+
 module Julewire
   module Core
     module Diagnostics
@@ -8,6 +10,9 @@ module Julewire
         DEFAULT_NAME = :tail
         COUNTER_KEYS = %i[captured failures].freeze
         Entry = Data.define(:sequence, :at, :record)
+        State = Data.define(:sequence, :items)
+        EMPTY_ENTRIES = [].freeze
+        private_constant :State, :EMPTY_ENTRIES
 
         class << self
           def attach!(runtime = Julewire, **)
@@ -39,11 +44,10 @@ module Julewire
 
         def emit(record)
           snapshot = snapshot_record(record)
-          @mutex.synchronize do
-            @sequence += 1
-            entry = Entry.new(@sequence, Time.now.utc, snapshot)
-            @entries << entry
-            @entries.shift while @entries.length > @capacity
+          @state_ref.update do |state|
+            sequence = state.sequence + 1
+            entries = (state.items + [Entry.new(sequence, Time.now.utc, snapshot)]).last(@capacity)
+            State.new(sequence, entries)
           end
           @health.increment(:captured)
           nil
@@ -54,7 +58,7 @@ module Julewire
 
         def entries(limit: nil)
           limit = normalize_limit(limit)
-          snapshot = @mutex.synchronize { @entries.dup }
+          snapshot = @state_ref.get.items.dup
           limit ? snapshot.last(limit) : snapshot
         end
 
@@ -72,10 +76,8 @@ module Julewire
         end
 
         def clear
-          @mutex.synchronize do
-            @entries.clear
-          end
-          @health.clear_degraded!
+          @state_ref.update { State.new(it.sequence, EMPTY_ENTRIES) }
+          @health.clear_failures!
           self
         end
 
@@ -89,17 +91,14 @@ module Julewire
         end
 
         def health
-          size = @mutex.synchronize { @entries.length }
-          @health.snapshot(capacity: @capacity, size: size)
+          @health.snapshot(capacity: @capacity, size: entries.length)
         end
 
         private
 
         def initialize_state
-          @mutex = Mutex.new
-          @entries = []
+          @state_ref = Concurrent::AtomicReference.new(State.new(0, EMPTY_ENTRIES))
           @health = Integration::DestinationHealth.new(counter_keys: COUNTER_KEYS)
-          @sequence = 0
           @serializer_mutex = Mutex.new
         end
 
@@ -123,7 +122,7 @@ module Julewire
           message = Records::DisplayMessage.call(record)
           return payload if blank?(message)
 
-          payload = payload.dup if payload.frozen?
+          payload = payload.dup
           payload["message"] = message
           payload
         end
@@ -131,10 +130,7 @@ module Julewire
         def serialize_payload(payload)
           return serialize_custom_payload(payload) if @serializer
 
-          serializer = cached_serializer
-          return build_serializer.serialize(payload) if serializer.in_use?
-
-          serializer.serialize(payload)
+          Serialization::SerializerPool.serialize_with(cached_serializer, payload) { build_serializer }
         end
 
         def serialize_custom_payload(payload)
@@ -142,11 +138,11 @@ module Julewire
         end
 
         def cached_serializer
-          Serialization::SerializerPool.serializer(@serializer_pool_key, :default) { build_serializer }
+          Serialization::SerializerPool.serializer(@serializer_pool_key, nil) { build_serializer }
         end
 
         def build_serializer
-          Serialization::Serializer.new(compact_empty: true)
+          Serializer.new(compact_empty: true)
         end
 
         def blank?(value)

@@ -5,11 +5,10 @@ module Julewire
     module Diagnostics
       module InternalRecords
         class << self
-          def emit_error(error, error_backtrace_lines:)
-            Core::Records::Draft.build(
+          def emit_error(error)
+            Records::Draft.build(
               {
                 severity: :error,
-                kind: :point,
                 event: "julewire.emit_error",
                 source: "julewire",
                 message: "Julewire emit failed",
@@ -17,17 +16,15 @@ module Julewire
                   error: failure_details(error)
                 }
               },
-              context: {},
-              scope: nil,
-              error_backtrace_lines: error_backtrace_lines
+              context: nil,
+              scope: nil
             )
           end
 
-          def processor_error(processor_name:, error:, record_metadata:, error_backtrace_lines:)
-            Core::Records::Draft.build(
+          def processor_error(processor_name:, error:, record_metadata:)
+            Records::Draft.build(
               {
                 severity: :error,
-                kind: :point,
                 event: "julewire.processor_error",
                 source: "julewire",
                 message: "Julewire processor failed",
@@ -38,9 +35,8 @@ module Julewire
                   record: record_metadata
                 }
               },
-              context: {},
-              scope: nil,
-              error_backtrace_lines: error_backtrace_lines
+              context: nil,
+              scope: nil
             )
           end
 

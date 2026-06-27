@@ -5,7 +5,6 @@ require "test_helper"
 module Julewire
   class TestRactorRuntimeValidation < Minitest::Test
     cover Julewire::Ractor::Bridge::RuntimeValidation
-
     def test_validate_accepts_bridge_compatible_runtime
       runtime = Object.new
       runtime.define_singleton_method(:emit_envelope) { nil }

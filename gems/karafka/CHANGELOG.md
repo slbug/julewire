@@ -1,5 +1,12 @@
 ## Unreleased
 
+## 1.1.0 - 2026-07-20
+
+- Report unsupported WaterDrop message shapes through Karafka integration
+  health instead of silently skipping propagation.
+- Restore propagated context through owned carrier envelopes.
+- Require julewire-core 1.1.0.
+
 ## 1.0.1 - 2026-06-25
 
 - Default propagation carrier byte limits to 64 KiB and record health when

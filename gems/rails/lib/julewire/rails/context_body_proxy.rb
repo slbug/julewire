@@ -11,7 +11,7 @@ module Julewire
       end
 
       def each(&block)
-        return enum_for(:each) unless block_given?
+        return enum_for unless block_given?
 
         @handle.with_context do
           @body.each { block.yield(it) }
@@ -31,8 +31,13 @@ module Julewire
 
       def closed? = @closed
 
-      def respond_to_missing?(method_name, include_private = false)
-        (method_name != :to_str && @body.respond_to?(method_name, include_private)) || super
+      def respond_to_missing?(method_name, _include_private)
+        case method_name
+        when :to_str
+          false
+        else
+          @body.respond_to?(method_name)
+        end
       end
 
       def method_missing(method_name, ...)

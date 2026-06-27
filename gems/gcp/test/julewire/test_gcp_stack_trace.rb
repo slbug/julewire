@@ -6,7 +6,6 @@ require "support/gcp_test_case"
 module Julewire
   class GcpStackTraceTest < GcpTestCase
     cover Julewire::GCP::StackTrace
-
     def test_keeps_explicit_message_and_nested_error_shape
       record = normalized_record(
         severity: :error,

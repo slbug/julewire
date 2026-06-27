@@ -15,21 +15,21 @@ module Julewire
 
         class << self
           def build(selector)
-            return new(true) if selector == true
             return unless selector
 
-            new(Array(selector).to_h { [normalize_name(it), true] })
+            allowed = Array(selector).to_h { [normalize_name(it), true] } unless selector == true
+            new(allowed)
           end
 
           def normalize_name(name) = name.to_s.tr("_", "-").downcase
         end
 
-        def initialize(selection)
-          @selection = selection
+        def initialize(allowed)
+          @allowed = allowed
         end
 
         def include?(name)
-          @selection == true ? !SENSITIVE_HEADER_SET.key?(name) : @selection.key?(name)
+          @allowed ? @allowed.key?(name) : !SENSITIVE_HEADER_SET.key?(name)
         end
       end
     end

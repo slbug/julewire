@@ -5,7 +5,6 @@ require "test_helper"
 module Julewire
   class TestExceptionSeverity < Minitest::Test
     cover Julewire::Rails::ExceptionSeverity
-
     def test_normalizes_rails_debug_exception_log_level
       request = request_with_level(::Logger::FATAL)
 

@@ -14,10 +14,6 @@ module Julewire
         private_constant :SCALAR_KEY_SET
 
         class << self
-          def container_keys = CONTAINER_KEYS
-
-          def scalar_keys = SCALAR_KEYS
-
           def container_key?(key) = CONTAINER_KEY_SET.key?(key)
 
           def scalar_key?(key) = SCALAR_KEY_SET.key?(key)

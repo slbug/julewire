@@ -17,5 +17,13 @@ module Julewire
       reset_julewire!
       Julewire::ActiveJob.reset!
     end
+
+    def emit_active_job_event(name:, payload:, configuration: Julewire::ActiveJob::Configuration.new)
+      subscriber = Julewire::ActiveJob::Subscribers::Event.new
+
+      Julewire::ActiveJob::JobExecution.call(fake_job, configuration:) do
+        subscriber.emit(name:, payload:)
+      end
+    end
   end
 end

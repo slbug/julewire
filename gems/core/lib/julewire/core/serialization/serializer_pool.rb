@@ -14,6 +14,15 @@ module Julewire
             end
             pool[serializer_key] ||= yield
           end
+
+          def serialize(pool_key, serializer_key, payload, &)
+            serialize_with(serializer(pool_key, serializer_key, &), payload, &)
+          end
+
+          def serialize_with(serializer, payload)
+            serializer = yield if serializer.in_use?
+            serializer.serialize(payload)
+          end
         end
       end
     end

@@ -1,5 +1,23 @@
 ## Unreleased
 
+## 1.1.0 - 2026-07-20
+
+- Make carrier extraction status public via `Carrier::Extracted` and rename the
+  convenience reader to `extract_envelope`.
+- Enforce recursive Symbol keys for owned records and protocols; reject invalid
+  processor results and malformed propagation sections instead of normalizing
+  or ignoring them.
+- Require canonical lowercase severity Symbols while retaining case-insensitive
+  String and standard-library Logger integer ingress.
+- Harden bounded serialization, `RecordDraft` isolation/finalization, and
+  processor, summary, and lifecycle failure health; remove reusable bounded
+  transforms and the undocumented `freeze_sections` mode.
+- Remove `Julewire::Testing::Contracts` and `Julewire::Testing::Chaos`; the
+  testing API now contains only capture and null-output observation fixtures.
+- Remove the generic deadline-scheduler SPI; main-process integrations now use
+  only the process-owned shared scheduler, leaving Ractor-safe timeout ownership
+  to the Ractor integration.
+
 ## 1.0.1 - 2026-06-25
 
 - Harden bounded traversal, ingress copying, and carrier extraction against

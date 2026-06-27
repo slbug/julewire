@@ -27,7 +27,7 @@ module Julewire
             rescue StandardError => e
               bridge_error = e
               warn_bridge_stopped(e)
-              Julewire::Ractor::PortLifecycle.close(port)
+              PortLifecycle.close(port)
               break
             end
           ensure
@@ -35,7 +35,7 @@ module Julewire
           end
 
           def close_message?(message)
-            message.is_a?(Hash) && message[:command] == :close
+            message.instance_of?(Hash) && message[:command] == :close
           end
 
           def monitor_message?(message)

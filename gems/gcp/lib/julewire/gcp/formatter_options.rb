@@ -20,7 +20,7 @@ module Julewire
         end
 
         def trace_headers_paths(paths)
-          Array(paths).filter_map { normalize_path(it, min_length: 1) }.freeze
+          Array(paths).filter_map { normalize_path(it, min_length: 1) }
         end
 
         def trace_value_path(path)
@@ -34,7 +34,7 @@ module Julewire
         def label_options(options)
           label_options = options.fetch(:label_options, {}).dup
           %i[max_labels max_label_key_bytes max_label_value_bytes].each do |key|
-            label_options[key] = options[key] if options.key?(key)
+            label_options[key] = options.fetch(key) if options.key?(key)
           end
           label_options
         end
@@ -42,12 +42,10 @@ module Julewire
         private
 
         def normalize_path(path, min_length:)
-          return if path.nil?
-
           normalized = Array(path).map { normalize_path_segment(it) }
           return if normalized.length < min_length
 
-          normalized.freeze
+          normalized
         end
 
         def normalize_path_segment(segment)

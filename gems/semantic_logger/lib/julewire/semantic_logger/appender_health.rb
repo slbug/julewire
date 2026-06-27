@@ -36,6 +36,8 @@ module Julewire
           {
             active: value.active?,
             capped: value.capped?,
+            lag_check_interval: value.lag_check_interval,
+            lag_threshold_s: value.lag_threshold_s,
             max_queue_size: value.max_queue_size,
             queue_size: value.queue.size,
             wrapped: call(value.appender)

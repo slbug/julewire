@@ -17,7 +17,7 @@ module Julewire
         runtime_callback_failures
         runtime_failures
       ].freeze
-      CloseTransition = Data.define(:state, :close_pipeline, :timeout)
+      CloseTransition = Data.define(:state, :timeout)
       PipelineReplacement = Data.define(
         :old_pipeline,
         :close_timeout,
@@ -29,15 +29,12 @@ module Julewire
 
       def initialize
         @configure_mutex = Mutex.new
-        @configure_generation = Concurrent::AtomicFixnum.new(0)
-        @state_mutex = Mutex.new
-        @post_close_emit_count = Concurrent::AtomicFixnum.new(0)
+        @configure_generation = Concurrent::AtomicFixnum.new
+        @post_close_emit_count = Concurrent::AtomicFixnum.new
         @runtime_health = build_runtime_health
         @integration_health = Diagnostics::IntegrationHealthStore.new
         @invalid_severity_reporter = Diagnostics::InvalidSeverityReporter.counter
-        @state_ref = Concurrent::AtomicReference.new(
-          RuntimeState.default(invalid_severity_reporter: @invalid_severity_reporter)
-        )
+        @state_ref = Concurrent::AtomicReference.new(RuntimeState.default)
         @execution_boundary = build_execution_boundary
       end
 
@@ -66,11 +63,11 @@ module Julewire
 
       def start_execution(...) = @execution_boundary.start_execution(...)
 
-      def emit(record = Core::UNSET, **fields, &)
+      def emit(record = UNSET, **fields, &)
         emit_with_level_check(record, true, fields, &)
       end
 
-      def emit_without_level(record = Core::UNSET, **fields, &)
+      def emit_without_level(record = UNSET, **fields, &)
         emit_with_level_check(record, false, fields, &)
       end
 
@@ -80,8 +77,7 @@ module Julewire
         end
       end
 
-      def emit_envelope(input:, context:, scope:, carry: {}, attributes: {}, neutral: {}, enforce_level: true,
-                        owned: false)
+      def emit_envelope(input:, context:, scope:, carry:, attributes:, neutral:, enforce_level: true, owned: false)
         reject_runtime_call_during_configure!(:emit_envelope)
         state = runtime_state
         return record_post_close_emit(state) if state.pipeline_closed
@@ -102,6 +98,7 @@ module Julewire
 
         begin
           input = scope.owned_summary_record_input
+          Serialization::DeepFreeze.validate_symbol_keys(input)
           state.pipeline.emit_isolated_input(input)
         rescue StandardError => e
           notify_failure(e, state, action: :emit_summary_record)
@@ -127,20 +124,18 @@ module Julewire
         config
       end
 
-      def flush(timeout: Core::UNSET)
+      def flush(timeout: UNSET)
         call_validated_lifecycle(:flush, timeout)
       end
 
-      def close(timeout: Core::UNSET)
+      def close(timeout: UNSET)
         close_state_resources(close_state(timeout))
       end
 
       def reset!
         increment_runtime_count(:reset_attempts)
         reset_result = reject_runtime_call_during_configure!(:reset!) do
-          @configure_mutex.synchronize do
-            @state_mutex.synchronize { reset_under_lock }
-          end
+          @configure_mutex.synchronize { reset_under_lock }
         end
         deadline = Scheduling::Deadline.for(reset_result.close_timeout)
         return unless reset_result.close_pipeline
@@ -153,6 +148,8 @@ module Julewire
         )
       end
 
+      def reset_facade! = RuntimeRegistry.reset(primary: self)
+
       def after_fork!
         reject_runtime_call_during_configure!(:after_fork!)
         RuntimeRegistry.reset_after_fork(primary: self)
@@ -161,7 +158,6 @@ module Julewire
       def reset_after_fork_runtime!
         reset_after_fork_state!
         runtime_state.pipeline.after_fork!
-        self
       end
 
       def record_integration_failure(integration, error, **metadata)
@@ -196,10 +192,10 @@ module Julewire
         if owned
           Records::Draft.build_pipeline_owned(
             input,
-            context: envelope_hash(context),
-            attributes: envelope_hash(attributes),
-            neutral: envelope_hash(neutral),
-            carry: envelope_hash(carry),
+            context: envelope_hash(context, owned: true),
+            attributes: envelope_hash(attributes, owned: true),
+            neutral: envelope_hash(neutral, owned: true),
+            carry: envelope_hash(carry, owned: true),
             scope: scope,
             error_backtrace_lines: state.configuration.error_backtrace_lines,
             input_owned: true,
@@ -208,10 +204,10 @@ module Julewire
         else
           Records::Draft.build(
             input,
-            context: envelope_hash(context),
-            attributes: envelope_hash(attributes),
-            neutral: envelope_hash(neutral),
-            carry: envelope_hash(carry),
+            context: envelope_hash(context, owned: false),
+            attributes: envelope_hash(attributes, owned: false),
+            neutral: envelope_hash(neutral, owned: false),
+            carry: envelope_hash(carry, owned: false),
             scope: scope,
             error_backtrace_lines: state.configuration.error_backtrace_lines,
             invalid_severity_reporter: @invalid_severity_reporter
@@ -244,11 +240,7 @@ module Julewire
       end
 
       def install_and_replace_pipeline(state, next_configuration, next_pipeline)
-        replaced_pipeline = @state_mutex.synchronize do
-          raise Error, "Julewire.configure state changed before install completed" unless runtime_state.equal?(state)
-
-          replace_pipeline(next_configuration, next_pipeline)
-        end
+        replaced_pipeline = replace_pipeline(next_configuration, next_pipeline, state: state)
         PipelineReplacement.new(
           replaced_pipeline,
           state.configuration.pipeline_close_timeout,
@@ -270,11 +262,14 @@ module Julewire
         Fiber[CONFIGURE_GUARD_KEY] = previous
       end
 
-      def replace_pipeline(configuration, pipeline)
-        state = runtime_state
+      def replace_pipeline(configuration, pipeline, state:)
+        next_state = state.next_generation(configuration: configuration, pipeline: pipeline)
+        unless @state_ref.compare_and_set(state, next_state)
+          raise Error, "Julewire.configure state changed before install completed"
+        end
+
         @post_close_emit_count.value = 0
-        @runtime_health.clear_degradation
-        @state_ref.set(state.next_generation(configuration: configuration, pipeline: pipeline))
+        @runtime_health.record_success
         state.pipeline
       end
 
@@ -293,7 +288,7 @@ module Julewire
       end
 
       def normalize_lifecycle_timeout(timeout, state)
-        timeout.equal?(Core::UNSET) ? state.configuration.pipeline_close_timeout : timeout
+        timeout.equal?(UNSET) ? state.configuration.pipeline_close_timeout : timeout
       end
 
       def validate_lifecycle_timeout!(timeout, name:)
@@ -301,7 +296,7 @@ module Julewire
       end
 
       def close_state_resources(transition)
-        return true unless transition.close_pipeline
+        return true unless transition
 
         deadline = Scheduling::Deadline.for(transition.timeout)
         call_pipeline_lifecycle_on(
@@ -314,17 +309,22 @@ module Julewire
 
       def close_state(timeout)
         reject_runtime_call_during_configure!(:close)
-        @state_mutex.synchronize do
-          state = runtime_state
-          timeout = normalize_lifecycle_timeout(timeout, state)
-          validate_lifecycle_timeout!(timeout, name: :timeout)
-          increment_runtime_count(:close_attempts)
-          close_pipeline = !state.pipeline_closed
-          return CloseTransition.new(state, false, timeout) unless close_pipeline
+        state = runtime_state
+        resolved_timeout = normalize_lifecycle_timeout(timeout, state)
+        validate_lifecycle_timeout!(resolved_timeout, name: :timeout)
+        increment_runtime_count(:close_attempts)
+        transition = nil
 
-          @state_ref.set(state.closed)
-          CloseTransition.new(state, close_pipeline, timeout)
+        @state_ref.update do |current_state|
+          transition = unless current_state.pipeline_closed
+                         CloseTransition.new(
+                           current_state,
+                           normalize_lifecycle_timeout(timeout, current_state)
+                         )
+                       end
+          current_state.closed
         end
+        transition
       end
 
       def call_pipeline_lifecycle_on(pipeline, method_name, timeout:, state:)
@@ -360,8 +360,8 @@ module Julewire
         end
       end
 
-      def envelope_hash(value)
-        value.is_a?(Hash) ? value : {}
+      def envelope_hash(value, owned:)
+        value if owned || value.is_a?(Hash)
       end
 
       def record_post_close_emit(state)
@@ -389,17 +389,22 @@ module Julewire
       end
 
       def pipeline_degraded?(pipeline_health)
-        return true if pipeline_health[:status] && pipeline_health[:status] != :ok
+        return true if degraded_health?(pipeline_health)
 
         pipeline_health.fetch(:destinations).values.any? do |destination_health|
-          destination_health[:status] && destination_health[:status] != :ok
+          degraded_health?(destination_health)
         end
       end
 
       def integrations_degraded?(integrations)
         integrations.values.any? do |integration_health|
-          integration_health[:status] && integration_health[:status] != :ok
+          degraded_health?(integration_health)
         end
+      end
+
+      def degraded_health?(health)
+        status = health[:status]
+        status && !status.equal?(:ok)
       end
 
       def clear_runtime_degradation_if_unchanged(marker)
@@ -407,30 +412,25 @@ module Julewire
       end
 
       def summary_finalizer_failure
-        @summary_finalizer_failure ||= ->(error) { handle_summary_finalizer_failure(error) }
+        @summary_finalizer_failure ||= ->(error, **metadata) { handle_summary_finalizer_failure(error, **metadata) }
       end
 
       def reset_after_fork_state!
-        state = runtime_state
-        @configure_mutex = Mutex.new
-        @configure_generation = Concurrent::AtomicFixnum.new(0)
-        @state_mutex = Mutex.new
-        @post_close_emit_count = Concurrent::AtomicFixnum.new(0)
+        @post_close_emit_count.value = 0
         @runtime_health = build_runtime_health
-        @integration_health.after_fork!
-        @invalid_severity_reporter.reset_after_fork!
-        @state_ref = Concurrent::AtomicReference.new(state)
-        nil
+        @integration_health.reset!
+        @invalid_severity_reporter.reset!
       end
 
       def reset_under_lock
         state = runtime_state
         configuration = Configuration.new.snapshot
         @invalid_severity_reporter.reset!
-        next_pipeline = configuration.build_pipeline(invalid_severity_reporter: @invalid_severity_reporter)
-        replace_pipeline(configuration, next_pipeline)
-        ContextStore.reset_current!
+        next_pipeline = configuration.build_pipeline
+        next_state = state.next_generation(configuration: configuration, pipeline: next_pipeline)
+        state = @state_ref.get_and_set(next_state)
         @post_close_emit_count.value = 0
+        ContextStore.reset_current!
         @runtime_health.clear_failures!
         @integration_health.reset!
         Diagnostics::ProcessIntegrationHealth.reset!
@@ -448,12 +448,12 @@ module Julewire
           raise Error, "Julewire.#{method_name} cannot be called from inside Julewire.configure"
         end
 
-        block_given? ? yield : nil
+        yield if block_given?
       end
 
       def configure_guard_active?
         token = Fiber[CONFIGURE_GUARD_KEY]
-        token.is_a?(Array) && token.fetch(0) == object_id && token.fetch(1) == @configure_generation.value
+        token.instance_of?(Array) && token.fetch(0) == object_id && token.fetch(1) == @configure_generation.value
       end
 
       def increment_lifecycle_attempt(method_name)
@@ -476,9 +476,8 @@ module Julewire
         @runtime_health.record_failure(error, callback: state.configuration.on_failure, **metadata)
       end
 
-      def handle_summary_finalizer_failure(error)
+      def handle_summary_finalizer_failure(error, **metadata)
         state = runtime_state
-        metadata = { phase: :summary_finalizer }
         @runtime_health.record_failure(error, callback: state.configuration.on_failure, **metadata)
       end
 
@@ -503,8 +502,6 @@ module Julewire
       end
 
       def notify_lifecycle_warning(warning)
-        return unless warning
-
         result = Diagnostics::CallbackNotifier.call(warning.fetch(:on_failure), warning.fetch(:error),
                                                     warning.fetch(:metadata))
         @runtime_health.record_callback_failure(result) if Diagnostics::CallbackNotifier.failure?(result)
@@ -513,7 +510,6 @@ module Julewire
       def build_runtime_health
         Diagnostics::Health.new(
           counter_keys: RUNTIME_COUNTER_KEYS,
-          callback_metadata: {},
           callback_failure_counter: :runtime_callback_failures,
           failure_counter: :runtime_failures
         )

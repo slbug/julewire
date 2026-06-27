@@ -4,7 +4,7 @@ module Julewire
   module Rails
     module Subscribers
       class Event
-        include Core::Integration::EventSubscriber
+        include Julewire::Core::Integration::EventSubscriber
 
         STRUCTURED_EVENT_FILES = %w[
           action_controller/structured_event_subscriber
@@ -20,7 +20,7 @@ module Julewire
         event_subscriber integration_health: IntegrationHealth, configuration_class: Configuration
 
         class << self
-          include Core::Integration::SubscriberInstall
+          include Julewire::Core::Integration::SubscriberInstall
 
           def install!(configuration)
             return reset! unless configuration.structured_events?
@@ -39,7 +39,7 @@ module Julewire
           private
 
           def require_structured_event_subscribers
-            STRUCTURED_EVENT_FILES.each { Core::Integration::Lifecycle.require_optional(it) }
+            STRUCTURED_EVENT_FILES.each { Julewire::Core::Integration::Lifecycle.require_optional(it) }
           end
         end
 
@@ -64,7 +64,7 @@ module Julewire
           elsif name == REQUEST_COMPLETED && current_execution?
             enrich_request_completion(payload)
           else
-            Core::Integration::Facade.emit(event_record.call(event, name: name, payload: payload))
+            Julewire::Core::Integration::Facade.emit(event_record.call(event, name: name, payload: payload))
           end
         end
 
@@ -91,7 +91,7 @@ module Julewire
         end
 
         def enrich_request_start(payload)
-          fields = payload.slice(*REQUEST_CONTEXT_KEYS, :params).compact
+          fields = payload.slice(*REQUEST_CONTEXT_KEYS, :params)
           add_summary_attributes(rails: fields)
         end
 
@@ -100,12 +100,10 @@ module Julewire
         end
 
         def add_summary_attributes(fields)
-          Core::Integration::Facade.add_summary_attributes(fields)
+          Julewire::Core::Integration::Facade.add_summary_attributes(fields)
         end
 
         def request_completion_fields(payload)
-          return payload unless payload.key?(:duration_ms)
-
           payload.merge(action_runtime_ms: payload[:duration_ms]).except(:duration_ms)
         end
 

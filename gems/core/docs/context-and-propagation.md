@@ -225,8 +225,21 @@ Execution metadata is restored as ordinary execution fields. Use
 `Julewire.with_execution(..., fields: { trace_id: "..." })` for custom
 execution fields at the public API boundary.
 
+Direct `Propagation.restore` treats its envelope as public/unowned input:
+String keys are normalized, but `_julewire_truncation` remains reserved and is
+rejected. `Carrier.restore` is the owned decoded-wire path; it preserves
+Julewire-generated truncation metadata while restoring the carrier envelope.
+Bridge code may also call `Propagation.restore(..., owned: true)` for a local
+Julewire-owned envelope. That strict path requires a recursively Symbol-keyed
+Hash and requires every present propagation section to be a Hash; it does not
+replace malformed owned sections with empty hashes.
+
 Propagation serializes values through the core serializer. That means values
 cross a log-safe boundary, not an object-identity boundary.
+
+Carrier JSON decode is a key-normalization boundary: decoded String keys become
+Symbols before restore. Once restored, context and carry are owned Symbol-key
+data; integrations must not add String-key overlays.
 
 Core does not redact propagation envelopes. Do not put secrets in context or
 carry unless your app or processor policy handles them.
@@ -277,6 +290,11 @@ injection when the carrier target has stricter size constraints:
 headers = Julewire::Core::Propagation::Carrier.inject({}, max_bytes: 8 * 1024)
 # => nil when the serialized carrier is too large; the carrier key is removed
 ```
+
+Integrations that need failure status should call `Carrier.extract_result` and
+inspect its public `Carrier::Extracted` fields: `status`, `reason`, `error`,
+and `envelope`. Use `Carrier.extract_envelope` for convenience-only restore
+paths.
 
 The default carrier key is `"julewire"`. Carriers are intentionally
 provider-neutral: core stores only the Julewire propagation envelope. External
@@ -343,6 +361,8 @@ counters.
 - current fiber context store
 - the old active pipeline/output lifecycle
 - live runtime post-close drop and callback-failure state
+- registered named runtimes and their pipelines when called through the main
+  `Julewire` facade; a later named lookup creates a fresh runtime
 
 `health[:counts]` is different: it is monotonic for the current runtime object
 and survives `reset!`. Use it for process-lifetime runtime lifecycle scrapes.

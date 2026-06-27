@@ -16,8 +16,10 @@ module Julewire
               integration: metadata[:integration],
               output_class: metadata[:output_class],
               phase: metadata[:phase],
+              processor: metadata[:processor],
               reason: metadata[:reason],
               record: record_metadata(metadata[:record_metadata]),
+              result_class: metadata[:result_class],
               status: metadata[:status]
             }.compact.freeze
           end
@@ -27,12 +29,14 @@ module Julewire
           def record_metadata(value)
             return unless value.is_a?(Hash)
 
-            {
+            labels = value[:labels]
+            metadata = {
               event: value[:event],
-              labels: value[:labels].is_a?(Hash) ? Fields::FieldSet.deep_dup(value[:labels]) : nil,
               severity: value[:severity],
               source: value[:source]
             }.compact
+            metadata[:labels] = Fields::FieldSet.deep_dup(labels) if labels.is_a?(Hash)
+            metadata
           end
         end
       end

@@ -5,6 +5,7 @@ require "stringio"
 
 module Julewire
   class TestDropCallbackContracts < Minitest::Test
+    cover Julewire::Core::Destinations::Destination
     def test_level_and_no_output_drops_do_not_call_on_drop
       drops = Queue.new
       output = StringIO.new

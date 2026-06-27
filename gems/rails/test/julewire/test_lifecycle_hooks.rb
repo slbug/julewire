@@ -4,6 +4,7 @@ require "test_helper"
 
 module Julewire
   class TestLifecycleHooks < Minitest::Test
+    cover Julewire::Rails::LifecycleHooks
     include Julewire::Rails::TestHelpers
 
     def test_lifecycle_hook_reads_shutdown_timeout_when_it_runs

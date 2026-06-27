@@ -19,11 +19,12 @@ module Julewire
         return false unless configuration.enabled?
 
         consumer_result = Installer.install!(app: app, monitor: monitor, configuration: configuration) if consumer
-        producer_result = WaterdropInstaller.install!(producer, configuration: configuration) if producer
+        return consumer_result unless producer
 
-        return InstallResult.new(consumer_result, producer_result) if consumer && producer
+        producer_result = WaterdropInstaller.install!(producer, configuration: configuration)
+        return InstallResult.new(consumer_result, producer_result) if consumer
 
-        producer ? producer_result : consumer_result
+        producer_result
       end
 
       def inject!(message, configuration: config)

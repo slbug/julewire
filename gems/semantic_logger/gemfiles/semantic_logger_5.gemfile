@@ -1,0 +1,23 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org", cooldown: 3
+
+gem "bundler-audit", ">= 0.9"
+gem "debride", ">= 1.15"
+gem "flay", ">= 2.14"
+gem "irb"
+gem "julewire-core", path: "../../core"
+gem "minitest", ">= 6.0"
+gem "minitest-reporters", ">= 1.8"
+gem "minitest-strict", ">= 1.0.0"
+gem "mutant-minitest", ">= 0.16"
+gem "rake", ">= 13.4"
+gem "rubocop", ">= 1.87"
+gem "rubocop-minitest", ">= 0.39"
+gem "rubocop-performance", ">= 1.26"
+gem "rubocop-rake", ">= 0.7"
+gem "semantic_logger", "~> 5.0"
+gem "simplecov", ">= 1.0.0"
+gem "simplecov-lcov", ">= 0.9"
+
+gemspec path: "../"

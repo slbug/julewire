@@ -5,6 +5,8 @@ require "stringio"
 
 module Julewire
   class TestPipelineFormatterContracts < Minitest::Test
+    cover Julewire::Core::Destinations::Destination
+    cover Julewire::Core::Destinations::WriteStep
     class FailingFormatter
       def call(_record)
         raise "format failed"
@@ -20,12 +22,6 @@ module Julewire
     class RawStringEncoder
       def call(payload)
         "#{payload}\n"
-      end
-    end
-
-    class HashFormatter
-      def call(_record)
-        { message: "mapped" }
       end
     end
 
@@ -84,7 +80,7 @@ module Julewire
     end
 
     def assert_formatter_failure(error_class, message)
-      error, metadata = @failure_events.pop
+      error, metadata = safe_queue_pop(@failure_events)
 
       assert_instance_of error_class, error
       assert_equal message, error.message

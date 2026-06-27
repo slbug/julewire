@@ -1,19 +1,25 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_boolean"
+
 module Julewire
   module Rails
     class RequestCompletion
       class << self
         def finish_instrumentation(instrumenter_handle)
-          instrumenter_handle&.finish
+          instrumenter_handle.finish
         rescue StandardError
           nil
         ensure
-          begin
-            ::ActiveSupport::LogSubscriber.flush_all!
-          rescue StandardError
-            nil
-          end
+          flush_log_subscribers
+        end
+
+        private
+
+        def flush_log_subscribers
+          ::ActiveSupport::LogSubscriber.flush_all!
+        rescue StandardError
+          nil
         end
       end
 
@@ -50,21 +56,17 @@ module Julewire
         response_finished = @env["rack.response_finished"]
         return unless response_finished.respond_to?(:<<)
 
-        response_finished << proc do |_rack_env, _status, _headers, error|
+        response_finished << lambda do |_rack_env, _status, _headers, error|
           finish_once.call(error)
         end
       end
 
       def completion_callback
-        mutex = Mutex.new
-        finished = false
+        finished = Concurrent::AtomicBoolean.new
         lambda do |error|
-          mutex.synchronize do
-            return if finished
+          return unless finished.make_true
 
-            finished = true
-          end
-          yield if block_given?
+          yield
           @execution_handle.with_context { finish_completion(error) }
         end
       end
@@ -90,12 +92,12 @@ module Julewire
       end
 
       def completion_timeout_context
-        return {} unless @configuration.request_context?
+        return unless @configuration.request_context?
 
         {
           request_id: request_id,
           path: @request.path
-        }.compact
+        }
       end
 
       def emit_completion_timeout_warning(timeout, context)
@@ -103,17 +105,16 @@ module Julewire
           event: "request.completion_timeout",
           logger: @configuration.logger_name,
           source: @configuration.source,
-          attributes: { rails: { completion_timeout_ms: (timeout * 1000).round } }
+          attributes: { rails: { completion_timeout_ms: (timeout * 1000).round } },
+          context: context
         }
-        record[:context] = context unless context.empty?
         Julewire.warn(record)
       rescue StandardError
         nil
       end
 
       def request_id
-        value = @request.request_id if @request.respond_to?(:request_id)
-        value || @request.get_header("action_dispatch.request_id") || @request.get_header("HTTP_X_REQUEST_ID")
+        RequestAttributes.request_id(@request)
       end
     end
   end

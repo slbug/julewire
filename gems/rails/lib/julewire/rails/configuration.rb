@@ -46,14 +46,14 @@ module Julewire
       private
 
       def validate_carry_request_headers(value)
-        return value unless value == true
+        return unless value == true
 
         raise Error, "carry_request_headers must be an explicit header list"
       end
 
       def validate_request_summary_timeout(value)
-        return value if value.nil?
-        return value if value.is_a?(Numeric) && value.positive?
+        return if value.nil?
+        return if value.is_a?(Numeric) && value.positive?
 
         raise Error, "request_summary_timeout must be nil or a positive Numeric"
       end
@@ -67,7 +67,7 @@ module Julewire
 
       def validate_capture_settings(settings)
         settings.validate!
-        settings
+        nil
       end
     end
   end

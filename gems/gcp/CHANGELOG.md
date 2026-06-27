@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 1.1.0 - 2026-07-20
+
+- Keep Cloud Logging formatting and decoding aligned with the core record field
+  taxonomy and deterministic trace/source parsing.
+- Require julewire-core 1.1.0.
+
 ## 1.0.1 - 2026-06-25
 
 - Replace the fallback backtrace regex with deterministic parsing so GCP source

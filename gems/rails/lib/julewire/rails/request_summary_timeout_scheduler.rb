@@ -20,18 +20,9 @@ module Julewire
           nil
         end
 
-        # Private testing seam for request-timeout isolation.
-        def reset_for_test!
-          Core::Scheduling::SharedScheduler.__send__(:reset_for_test!)
-          nil
-        end
-
         def after_fork!
           Core::Scheduling::SharedScheduler.after_fork!
-          nil
         end
-
-        private :reset_for_test!
       end
     end
   end

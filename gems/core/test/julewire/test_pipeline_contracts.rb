@@ -5,6 +5,9 @@ require "stringio"
 
 module Julewire
   class TestPipelineContracts < Minitest::Test
+    cover Julewire::Core::Processing::Pipeline
+    cover "Julewire::Core::Processing::ProcessorChain*"
+    cover "Julewire::Core::Processing::Pipeline#destination_defaults"
     def test_pipeline_rejects_non_duck_formatter_output_and_processors
       assert_raises(ArgumentError) { build_pipeline(formatter: Object.new, output: StringIO.new) }
       assert_raises(ArgumentError) { build_pipeline(output: Object.new) }
@@ -23,7 +26,7 @@ module Julewire
 
       pipeline.emit(message: "format")
 
-      error, metadata = failures.pop
+      error, metadata = safe_queue_pop(failures)
 
       assert_instance_of ArgumentError, error
       assert_equal :formatter, metadata.fetch(:phase)
@@ -47,7 +50,7 @@ module Julewire
 
       pipeline.emit(message: "write")
 
-      error, metadata = failures.pop
+      error, metadata = safe_queue_pop(failures)
 
       assert_instance_of ArgumentError, error
       assert_equal :output, metadata.fetch(:phase)
@@ -109,7 +112,7 @@ module Julewire
 
       pipeline.emit(source: "app", event: "work", labels: { service: "core" })
 
-      error, phase, metadata = failures.pop
+      error, phase, metadata = safe_queue_pop(failures)
 
       assert_equal "processor failed", error.message
       assert_equal :processor, phase

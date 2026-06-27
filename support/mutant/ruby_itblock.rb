@@ -2,15 +2,13 @@
 
 require "mutant"
 
-module Julewire
-  module MutantRubyItBlock
-    def for(type)
-      return super(:numblock) if type.equal?(:itblock)
+module MutantRubyItBlockShim
+  def for(type)
+    return super(:numblock) if type.equal?(:itblock)
 
-      super
-    end
+    super
   end
 end
 
-Mutant::AST::Structure.singleton_class.prepend(Julewire::MutantRubyItBlock)
+Mutant::AST::Structure.singleton_class.prepend(MutantRubyItBlockShim)
 Mutant::Mutator::Node::Numblock.__send__(:handle, :itblock)

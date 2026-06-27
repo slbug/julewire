@@ -17,7 +17,7 @@ module Julewire
           raise ArgumentError, "match handler is required" unless handler
 
           conditions = normalize_conditions(conditions, keyword_conditions)
-          @rules << Rule.new(conditions.freeze, handler)
+          @rules << Rule.new(conditions, handler)
           self
         end
 
@@ -46,7 +46,9 @@ module Julewire
         end
 
         def matches_conditions?(draft, conditions)
-          conditions.all? { |key, pattern| matches_value?(pattern, draft[key]) }
+          conditions.all? do |key, pattern|
+            draft.key?(key) && matches_value?(pattern, draft.fetch(key))
+          end
         end
 
         def matches_value?(pattern, value)
@@ -64,8 +66,8 @@ module Julewire
           return false unless value.is_a?(Hash)
 
           pattern.all? do |key, nested_pattern|
-            nested_value = Fields::FieldSet.value_for(value, key, default: Core::UNSET)
-            !nested_value.equal?(Core::UNSET) && matches_value?(nested_pattern, nested_value)
+            nested_value = Fields::FieldSet.value_for(value, key, default: UNSET)
+            !nested_value.equal?(UNSET) && matches_value?(nested_pattern, nested_value)
           end
         end
       end

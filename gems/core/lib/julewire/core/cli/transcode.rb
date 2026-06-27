@@ -69,7 +69,7 @@ module Julewire
 
         def apply_named_option(options, value)
           if value.start_with?("--from=")
-            options[:from] = value.delete_prefix("--from=").to_sym
+            options[:from] = value.delete_prefix("--from=")
           elsif value.start_with?("--to=")
             options[:to] = value.delete_prefix("--to=").to_sym
           else
@@ -84,7 +84,7 @@ module Julewire
           when "--theme" then options[:theme] = next_symbol_option("--theme")
           when "--max-value-bytes" then options[:max_value_bytes] = positive_integer_option("--max-value-bytes")
           else
-            apply_path_option(options, value, command: "transcode")
+            raise ArgumentError, "unknown option #{value}"
           end
         end
 
@@ -95,9 +95,8 @@ module Julewire
         end
 
         def each_entry(path, &)
-          return indexed_lines(@stdin.each_line).each(&) if path == "-"
-
-          File.open(path, "r") { |file| indexed_lines(file.each_line).each(&) }
+          lines = path == "-" ? @stdin.each_line : File.foreach(path)
+          indexed_lines(lines).each(&)
         end
       end
     end

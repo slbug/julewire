@@ -10,6 +10,8 @@ module Julewire
         DEFAULT_KEY = "julewire"
         DEFAULT_MAX_BYTES = 65_536
         DEFAULT_ENVELOPE = Core.sentinel(:default_envelope)
+
+        # @api integration_spi
         class Extracted
           attr_reader :envelope, :status, :reason, :error
 
@@ -23,7 +25,6 @@ module Julewire
           def failure? = !error.nil?
         end
         private_constant :DEFAULT_ENVELOPE
-        private_constant :Extracted
 
         # @api integration_spi
         class ExtractionError < StandardError
@@ -40,7 +41,7 @@ module Julewire
           def encode(envelope: DEFAULT_ENVELOPE, max_bytes: nil)
             Validation.validate_byte_limit!(max_bytes, name: :max_bytes)
 
-            encoded = JSON.generate(serialized_envelope(envelope), allow_nan: false)
+            encoded = JSON.generate(serialized_envelope(envelope))
             return if max_bytes && encoded.bytesize > max_bytes
 
             encoded
@@ -49,14 +50,14 @@ module Julewire
           def inject(carrier = {}, envelope: DEFAULT_ENVELOPE, key: DEFAULT_KEY, max_bytes: nil)
             validate_carrier!(carrier)
             encoded = encode(envelope: envelope, max_bytes: max_bytes)
-            clear_carrier_key!(carrier, key) unless encoded
+            clear_carrier_key!(carrier, key)
             return unless encoded
 
             carrier[key.to_s] = encoded
             carrier
           end
 
-          def extract(carrier, key: DEFAULT_KEY, max_bytes: DEFAULT_MAX_BYTES)
+          def extract_envelope(carrier, key: DEFAULT_KEY, max_bytes: DEFAULT_MAX_BYTES)
             extract_result(carrier, key: key, max_bytes: max_bytes).envelope
           end
 
@@ -90,7 +91,10 @@ module Julewire
             end
 
             parsed = JSON.parse(string)
-            return extracted_failure(:non_hash, "carrier payload must be a JSON object") unless parsed.is_a?(Hash)
+            unless parsed.instance_of?(Hash)
+              return extracted_failure(:non_hash,
+                                       "carrier payload must be a JSON object")
+            end
 
             extracted(Fields::FieldSet.deep_symbolize_owned_keys(parsed), :ok)
           rescue StandardError => e
@@ -103,7 +107,7 @@ module Julewire
 
           def extracted_failure(status, reason, cause = nil)
             error = ExtractionError.new(status, reason)
-            error.set_backtrace(cause.backtrace) if cause&.backtrace
+            error.set_backtrace(cause.backtrace) if cause
             Extracted.new(envelope: {}, status: status, reason: reason, error: error)
           end
 
@@ -122,14 +126,10 @@ module Julewire
           def clear_carrier_key!(carrier, key)
             string_key = key.to_s
             symbol_key = Fields::Internal.normalize_key(key)
-            if carrier.respond_to?(:delete)
-              begin
-                carrier.delete(string_key)
-                carrier.delete(symbol_key)
-              rescue StandardError
-                clear_carrier_key_by_assignment(carrier, string_key, symbol_key)
-              end
-            else
+            begin
+              carrier.delete(string_key)
+              carrier.delete(symbol_key)
+            rescue StandardError
               clear_carrier_key_by_assignment(carrier, string_key, symbol_key)
             end
           end

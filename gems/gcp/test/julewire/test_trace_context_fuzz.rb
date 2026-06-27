@@ -7,7 +7,6 @@ module Julewire
   class TestTraceContextFuzz < Minitest::Test
     cover Julewire::GCP::TraceContext
     cover Julewire::GCP::TraceContext::Traceparent
-
     SEED = 0x20260612
     ITERATIONS = 120
 

@@ -19,7 +19,8 @@ module Julewire
       def inject_carrier(message)
         IntegrationHealth.with_failure_health(action: :carrier_inject, component: :waterdrop_middleware) do
           headers = headers_for(message)
-          Julewire::Core::Propagation::Carrier.inject(
+
+          Core::Propagation::Carrier.inject(
             headers,
             key: @configuration.carrier_key,
             max_bytes: @configuration.carrier_max_bytes
@@ -32,8 +33,6 @@ module Julewire
           message.headers ||= {}
         elsif message.is_a?(Hash)
           message[:headers] ||= {}
-        else
-          {}
         end
       end
     end

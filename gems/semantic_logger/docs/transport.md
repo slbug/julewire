@@ -64,21 +64,9 @@ Verified paths:
 ## Metric Mapping
 
 The adapter owns metric names because queue, file, and appender behavior is
-transport-specific. One practical mapping is:
-
-| Health path | Metric name |
-| --- | --- |
-| `counts.*` | `julewire_runtime_total{event}` |
-| `pipeline.counts.*` | `julewire_pipeline_total{event}` |
-| `destinations.*.counts.*` | `julewire_destination_total{destination,event}` |
-| `destinations.*.last_loss.reason` | `julewire_destination_last_loss{destination,reason}` |
-| `destinations.*.transport.counts.*` | `julewire_semantic_logger_transport_total{destination,event}` |
-| `destinations.*.transport.appender.queue_size` | `julewire_semantic_logger_queue_size{destination}` |
-| `destinations.*.transport.appender.max_queue_size` | `julewire_semantic_logger_queue_capacity{destination}` |
-| `destinations.*.transport.warnings.*` | `julewire_semantic_logger_warning{destination,reason}` |
-
-Extensions should treat core health paths as inputs, not as a global metrics
-schema.
+transport-specific. The [health guide](health.md#metric-mapping) is the
+canonical mapping; extensions should treat core health paths as inputs, not as
+a global metrics schema.
 
 Observed behavior:
 

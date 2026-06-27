@@ -1,5 +1,13 @@
 ## Unreleased
 
+## 1.1.0 - 2026-07-20
+
+- Roll back pushed request tags when request instrumentation fails during
+  middleware startup.
+- Harden request logging, filtering, suppression, and error ownership around
+  Julewire 1.1 record contracts.
+- Require Julewire 1.1.0 internal gems.
+
 ## 1.0.1 - 2026-06-25
 
 - Require julewire 1.0.1 internal gems.

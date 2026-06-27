@@ -29,11 +29,14 @@ module Julewire
           end
 
           def from_owned_hash(record, lineage: nil, trust_frozen: false)
-            validate_normalized_hash!(record)
+            validate_normalized_hash_structure!(record)
             lineage ||= Execution::Lineage.from_execution_hash(record.fetch(:execution))
             execution = Execution::Lineage.clean_normalized_lazy_relationship_hash(record.fetch(:execution))
             record = record.frozen? ? record.merge(execution: execution) : replace_execution(record, execution)
-            new(Serialization::DeepFreeze.call(record, trust_frozen: trust_frozen), lineage: lineage)
+            new(
+              Serialization::DeepFreeze.call(record, trust_frozen: trust_frozen, validate_symbol_keys: true),
+              lineage: lineage
+            )
           end
 
           def validate_normalized!(record)
@@ -54,11 +57,22 @@ module Julewire
             record
           end
 
+          def validate_normalized_hash_structure!(record)
+            validate_record_hash!(record)
+            validate_structure!(record)
+          end
+
           def validate_hash!(record)
-            raise TypeError, "record must be a normalized Hash" unless record.is_a?(Hash)
-
+            validate_record_hash!(record)
             validate_symbol_keys!(record)
+            validate_structure!(record)
+          end
 
+          def validate_record_hash!(record)
+            raise TypeError, "record must be a normalized Hash" unless record.is_a?(Hash)
+          end
+
+          def validate_structure!(record)
             validate_required_keys!(record)
             validate_known_keys!(record)
 
@@ -69,39 +83,7 @@ module Julewire
           end
 
           def validate_symbol_keys!(record)
-            validate_value_symbol_keys!(record)
-          end
-
-          def validate_value_symbol_keys!(root)
-            queue = [[root, 0]]
-            seen = {}.compare_by_identity
-
-            queue.each do |value, depth|
-              break if depth == NORMALIZATION_MAX_DEPTH
-              next unless mark_symbol_key_container(value, seen)
-
-              enqueue_symbol_key_children(queue, value, depth + 1)
-            end
-          end
-
-          def mark_symbol_key_container(value, seen)
-            return unless value.is_a?(Hash) || value.is_a?(Array)
-            return if seen.key?(value)
-
-            seen[value] = nil
-            value
-          end
-
-          def enqueue_symbol_key_children(queue, value, depth)
-            if value.is_a?(Hash)
-              value.each do |key, item|
-                raise TypeError, "record must not use string keys" if key.is_a?(String)
-
-                queue << [item, depth]
-              end
-            else
-              value.each { queue << [it, depth] }
-            end
+            Serialization::DeepFreeze.validate_symbol_keys(record)
           end
 
           def validate_required_keys!(record)

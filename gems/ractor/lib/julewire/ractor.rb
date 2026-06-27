@@ -7,7 +7,7 @@ module Julewire
   module Ractor
     class << self
       def health
-        bridge_health
+        Bridge.health
       end
 
       def child_stats
@@ -24,14 +24,9 @@ module Julewire
 
       def enable_default_destination_workers!
         Core::Destinations.register(:default) { |name:, **options| Destination.new(name: name, **options) }
-        nil
       end
 
       private
-
-      def bridge_health
-        Bridge.health
-      end
 
       def child_runtime
         runtime = Core::RuntimeLocator.current
@@ -53,7 +48,7 @@ module Julewire
     def ractor(*args, name: nil, &block)
       raise ArgumentError, "block required" unless block
 
-      Ractor::Bridge.spawn(args: args, name: name, runtime: Core::RuntimeLocator.current, &block)
+      Ractor::Bridge.start(args: args, name: name, runtime: Core::RuntimeLocator.current, &block)
     end
   end
 end

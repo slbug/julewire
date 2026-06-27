@@ -17,10 +17,11 @@ module Julewire
           payload = event_payload(event)
           return {} unless payload.is_a?(Hash)
 
-          payload.each_with_object(consumer_payload(name, payload)) do |(key, value), result|
+          fields = payload.each_with_object(consumer_payload(name, payload)) do |(key, value), result|
             safe = safe_value(key, value)
             result[key] = safe unless safe.nil?
           end
+          Core::Fields::FieldSet.deep_symbolize_keys(fields)
         rescue StandardError => e
           { payload_error: { exception_class: e.class.name } }
         end

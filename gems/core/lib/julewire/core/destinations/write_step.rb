@@ -28,16 +28,16 @@ module Julewire
         def call(record)
           increment(:received)
           payload = format_record(record)
-          return :dropped unless payload
+          return false unless payload
 
           increment(:formatted)
           encoded = encode_payload(payload, record)
-          return :dropped unless encoded
-          return :dropped unless within_limit?(encoded, record)
-          return :dropped unless write(encoded, record)
+          return false unless encoded
+          return false unless within_limit?(encoded, record)
+          return false unless write(encoded, record)
 
           increment(:output_accepted)
-          :accepted
+          true
         end
 
         private

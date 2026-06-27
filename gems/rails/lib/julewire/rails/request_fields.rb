@@ -16,7 +16,7 @@ module Julewire
         nil
       end
 
-      def method
+      def request_method
         @request.request_method
       end
 
@@ -40,7 +40,7 @@ module Julewire
 
       def remote_ip
         env = @request.env if @request.respond_to?(:env)
-        return env[REMOTE_IP_ENV_KEY] if env&.key?(REMOTE_IP_ENV_KEY)
+        return env.fetch(REMOTE_IP_ENV_KEY) if env&.key?(REMOTE_IP_ENV_KEY)
 
         value = @request.remote_ip
         env[REMOTE_IP_ENV_KEY] = value if env

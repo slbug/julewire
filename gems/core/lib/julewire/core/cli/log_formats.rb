@@ -11,17 +11,17 @@ module Julewire
         @entries = []
 
         class << self
-          def register(name, decoder: nil, encoder: nil, priority: 0)
+          def register(name, decoder: nil, encoder: nil, priority: nil)
             name = normalize(name)
             validate_component(decoder, :decoder) if decoder
             validate_component(encoder, :encoder) if encoder
             existing = @entries.find { it.name == name }
-            priority = priority.to_i
+            priority = priority.nil? ? existing&.priority || 0 : Integer(priority)
             entry = Entry.new(
               name: name,
               decoder: decoder || existing&.decoder,
               encoder: encoder || existing&.encoder,
-              priority: priority.zero? && existing ? existing.priority : priority
+              priority: priority
             )
             @entries = @entries.reject { it.name == name } + [entry]
             entry
@@ -43,21 +43,21 @@ module Julewire
 
           def record_from_json_line(line, line_number:, format: AUTO_FORMAT)
             payload = JSON.parse(line)
-            Records::Record.from_normalized_hash(decode(payload, format: format))
+            Record.from_normalized_hash(decode(payload, format: format))
           rescue JSON::ParserError => e
-            raise ArgumentError, "line #{line_number}: invalid JSON: #{e.message}"
+            raise ArgumentError, "line #{line_number}: invalid JSON: #{e}"
           rescue TypeError, ArgumentError => e
-            raise ArgumentError, "line #{line_number}: #{e.message}"
+            raise ArgumentError, "line #{line_number}: #{e}"
           end
 
           def normalize(value)
             name = Core.normalize_name(value, name: "log format")
-            return name if name.to_s.match?(FORMAT_NAME_PATTERN)
+            return name if name.match?(FORMAT_NAME_PATTERN)
 
             raise ArgumentError, "log format must contain lowercase letters, digits, or underscores"
           end
 
-          def load(name)
+          def load_gem_format(name)
             path = "julewire/#{name}"
             require path
           rescue LoadError => e
@@ -99,7 +99,7 @@ module Julewire
           def load_format(name)
             return if @entries.any? { it.name == name }
 
-            load(name)
+            load_gem_format(name)
           end
 
           def decode_entries

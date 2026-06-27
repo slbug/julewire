@@ -5,7 +5,6 @@ require "test_helper"
 module Julewire
   class TestFieldStackProperty < Minitest::Test
     cover Julewire::Core::Fields::FieldStack
-
     SEED = 42_013
     KEYS = %i[account http job request].freeze
     NESTED_KEYS = %i[id plan token status].freeze
@@ -41,7 +40,7 @@ module Julewire
         assert_temporary_delete(stack, model, random)
         [stack, model]
       else
-        assert_fork_matches_model(stack, model, random)
+        assert_branch_matches_model(stack, model, random)
       end
     end
 
@@ -63,13 +62,13 @@ module Julewire
       [stack, model_delete(model, path)]
     end
 
-    def assert_fork_matches_model(stack, model, random)
-      fork = stack.fork
-      fork_model = model_deep_dup(model)
-      fork_fields = random_fields(random)
-      fork.add(fork_fields)
+    def assert_branch_matches_model(stack, model, random)
+      branch = stack.branch
+      branch_model = model_deep_dup(model)
+      branch_fields = random_fields(random)
+      branch.add(branch_fields)
 
-      assert_stack_matches_model(fork, model_merge(fork_model, fork_fields), random)
+      assert_stack_matches_model(branch, model_merge(branch_model, branch_fields), random)
       [stack, model]
     end
 
@@ -101,9 +100,9 @@ module Julewire
 
     def assert_temporary_scoped_model(stack, inside_model, random)
       assert_stack_matches_model(stack, inside_model, random)
-      fork = stack.fork
+      branch = stack.branch
 
-      assert_stack_matches_model(fork, inside_model, random)
+      assert_stack_matches_model(branch, inside_model, random)
     end
 
     def assert_stack_matches_model(stack, model, random)
@@ -127,7 +126,7 @@ module Julewire
     end
 
     def random_owned_fields(random)
-      { random_key(random) => random_value(random, string_nested_keys: false) }
+      { KEYS.sample(random: random) => random_value(random, string_nested_keys: false) }
     end
 
     def random_key(random)

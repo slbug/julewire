@@ -3,7 +3,7 @@
 module Julewire
   module GCP
     class Destination < Julewire::Core::Destinations::Destination
-      def initialize(output:, name: :gcp, formatter: nil, encoder: Julewire::JsonEncoder.new,
+      def initialize(output:, name: :gcp, formatter: nil, encoder: JsonEncoder.new,
                      max_record_bytes: DEFAULT_MAX_RECORD_BYTES, close_output: false, on_drop: nil,
                      on_failure: nil)
         super(

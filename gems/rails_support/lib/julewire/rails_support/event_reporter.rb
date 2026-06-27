@@ -5,10 +5,10 @@ module Julewire
     module EventReporter
       class << self
         def default
-          rails = top_level_constant(:Rails)
+          rails = LogSubscribers.constantize(:Rails)
           return rails.event if rails.respond_to?(:event)
 
-          active_support = top_level_constant(:ActiveSupport)
+          active_support = LogSubscribers.constantize(:ActiveSupport)
           return unless active_support.respond_to?(:event_reporter)
 
           active_support.event_reporter
@@ -39,17 +39,11 @@ module Julewire
         private
 
         def log_subscriber?(subscriber_class)
-          active_support = top_level_constant(:ActiveSupport)
+          active_support = LogSubscribers.constantize(:ActiveSupport)
           event_reporter = active_support.const_get(:EventReporter, false)
           subscriber_class < event_reporter.const_get(:LogSubscriber, false)
         rescue StandardError
           false
-        end
-
-        def top_level_constant(name)
-          Object.const_get(name, false)
-        rescue NameError
-          nil
         end
       end
     end

@@ -6,17 +6,8 @@ module Julewire
       class << self
         def silence!
           Core::Integration::Lifecycle.require_optional("active_job/log_subscriber")
-          subscriber_class = active_job_log_subscriber
-          return unless subscriber_class
-
-          subscriber_class.detach_from(:active_job) if subscriber_class.respond_to?(:detach_from)
-          Julewire::RailsSupport::EventReporter.unsubscribe_log_subscriber(subscriber_class)
-        end
-
-        private
-
-        def active_job_log_subscriber
-          ::ActiveJob::LogSubscriber if defined?(::ActiveJob::LogSubscriber)
+          subscriber_class = ::ActiveJob::LogSubscriber if defined?(::ActiveJob::LogSubscriber)
+          Julewire::RailsSupport::LogSubscribers.detach(subscriber_class, :active_job)
         end
       end
     end

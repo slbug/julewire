@@ -30,7 +30,7 @@ module Julewire
         private
 
         def validate_body(value)
-          return value if CAPTURE_BODY_VALUES.include?(value)
+          return if CAPTURE_BODY_VALUES.include?(value)
 
           raise Error, "body must be false, true, or :json"
         end

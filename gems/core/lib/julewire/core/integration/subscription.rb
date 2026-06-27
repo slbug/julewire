@@ -7,7 +7,8 @@ module Julewire
       class Subscription
         attr_reader :subscriber
 
-        def initialize(subscriber, unsubscribe: nil)
+        def initialize(subscriber, unsubscribe:)
+          Validation.validate_callable!(unsubscribe, name: :unsubscribe)
           @subscriber = subscriber
           @unsubscribe = unsubscribe
         end
@@ -18,7 +19,7 @@ module Julewire
         end
 
         def reset
-          @unsubscribe&.call
+          @unsubscribe.call
           nil
         rescue StandardError
           nil

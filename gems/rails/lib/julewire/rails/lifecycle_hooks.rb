@@ -29,17 +29,7 @@ module Julewire
           RequestErrorOwnership.clear
         end
 
-        # Private testing seam for isolating process lifecycle hooks.
-        def reset_for_test!
-          @mutex.synchronize do
-            @at_exit_installed = false
-            @fork_tracker_installed = false
-          end
-        end
-
         private
-
-        private :reset_for_test!
 
         def install_at_exit!(registrar, configuration)
           return if @at_exit_installed
@@ -64,7 +54,6 @@ module Julewire
             action: :install_after_fork,
             component: :lifecycle_hooks
           )
-          nil
         end
 
         def active_support_fork_tracker

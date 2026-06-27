@@ -10,7 +10,16 @@ module Julewire
       private_constant :PROFILE_CONSTANTS
 
       class << self
-        def install!(monitor, profile:, configuration: Configuration.new)
+        def subscribe(monitor, event_name, component:, &)
+          return false unless monitor.respond_to?(:subscribe)
+
+          IntegrationHealth.with_failure_health(action: :subscribe, component:, event: event_name) do
+            monitor.subscribe(event_name, &)
+            true
+          end
+        end
+
+        def install!(monitor, profile:, configuration:)
           profile = monitor_listener_profile(profile)
           state = subscription_state(monitor, profile)
           listener = listener_for(state, configuration, profile)
@@ -23,21 +32,22 @@ module Julewire
             next if subscriptions.key?(event_name)
 
             callback = ->(event) { listener.emit(event_name, event) }
-            subscriptions[event_name] = callback if subscribe_event(monitor, event_name, profile, &callback)
+            if subscribe(monitor, event_name, component: profile.component, &callback)
+              subscriptions[event_name] = callback
+            end
           end
           store_subscription_state(monitor, listener: listener, subscriptions: subscriptions, profile: profile)
-          listener
         end
 
         private
 
         def monitor_listener_profile(profile)
-          constant_name = PROFILE_CONSTANTS.fetch(profile) { return profile }
-          MonitorListener.const_get(constant_name, false)
+          constant_name = PROFILE_CONSTANTS.fetch(profile)
+          MonitorListener.const_get(constant_name)
         end
 
         def listener_for(state, configuration, profile)
-          listener = state && state[:listener]
+          listener = state&.fetch(:listener)
           if listener
             listener.configuration = configuration
             listener
@@ -49,7 +59,7 @@ module Julewire
         def subscriptions_for(state)
           return {} unless state
 
-          state[:subscriptions].is_a?(Hash) ? state[:subscriptions].dup : {}
+          state.fetch(:subscriptions)
         end
 
         def subscription_state(monitor, profile)
@@ -59,7 +69,7 @@ module Julewire
         def store_subscription_state(monitor, listener:, subscriptions:, profile:)
           subscription_state_store(profile).store(
             monitor,
-            { listener: listener, subscriptions: subscriptions.freeze }.freeze
+            { listener: listener, subscriptions: subscriptions }
           )
         end
 
@@ -96,31 +106,19 @@ module Julewire
         end
 
         def direct_available_events(monitor)
-          return [] unless monitor.respond_to?(:available_events)
-
-          Array(monitor.available_events)
-        rescue StandardError
-          []
+          Array(Core::Integration::Values::Read.value(monitor, :available_events))
         end
 
         def notification_bus_available_events(monitor)
-          return [] unless monitor.respond_to?(:notifications_bus)
+          bus = Core::Integration::Values::Read.value(monitor, :notifications_bus)
 
-          bus = monitor.notifications_bus
-          return [] unless bus.respond_to?(:available_events)
-
-          Array(bus.available_events)
-        rescue StandardError
-          []
+          Array(Core::Integration::Values::Read.value(bus, :available_events))
         end
 
         def listener_event_names(monitor)
-          return [] unless monitor.respond_to?(:listeners)
+          listeners = Core::Integration::Values::Read.value(monitor, :listeners)
 
-          listeners = monitor.listeners
           listeners.is_a?(Hash) ? listeners.keys : []
-        rescue StandardError
-          []
         end
 
         def all_events?(configured)
@@ -131,7 +129,7 @@ module Julewire
           return unless monitor.respond_to?(:unsubscribe)
 
           desired = desired_events.to_h { [it, true] }
-          subscriptions.each_key.to_a.each do |event_name|
+          subscriptions.each_key do |event_name|
             next if desired.key?(event_name)
 
             callback = subscriptions.delete(event_name)
@@ -145,18 +143,8 @@ module Julewire
             component: profile.component,
             event: event_name
           ) do
-            monitor.unsubscribe(callback || event_name)
-            true
+            monitor.unsubscribe(callback)
           end
-        end
-
-        def subscribe_event(monitor, event_name, profile, &)
-          return false unless monitor.respond_to?(:subscribe)
-
-          IntegrationHealth.with_failure_health(action: :subscribe, component: profile.component, event: event_name) do
-            monitor.subscribe(event_name, &)
-            true
-          end || false
         end
       end
     end

@@ -31,7 +31,7 @@ module Julewire
       rescue Interrupt
         INTERRUPTED_STATUS
       rescue ArgumentError, Errno::ENOENT => e
-        fail_with(e.message)
+        fail_with(e)
       end
 
       private

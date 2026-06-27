@@ -1,27 +1,23 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_boolean"
+
 module Julewire
   module Core
     module Execution
       class MeasurementHandle
         def initialize(&finish)
           @finish = finish
-          @finished = false
-          @mutex = Mutex.new
+          @finished = Concurrent::AtomicBoolean.new
         end
 
         def finish
-          @mutex.synchronize do
-            return if @finished
+          return unless @finished.make_true
 
-            @finished = true
-            @finish.call
-          end
+          @finish.call
         end
 
-        def finished?
-          @mutex.synchronize { @finished }
-        end
+        def finished? = @finished.true?
       end
     end
   end

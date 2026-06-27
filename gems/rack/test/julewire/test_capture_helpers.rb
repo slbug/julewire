@@ -6,20 +6,21 @@ require "rack/request"
 require "stringio"
 
 module Julewire
-  class TestCaptureHelpers < Minitest::Test # rubocop:disable Metrics/ClassLength -- Capture helper edge matrix.
+  class CaptureTestCase < Minitest::Test; end
+
+  class TestCaptureBodyContentType < CaptureTestCase
     cover Julewire::Rack::Capture::BodyContentType
-    cover Julewire::Rack::Capture::RequestBody
 
     def test_body_content_type_edges
       request = json_request('{"ok":true}', content_type: "application/vnd.api+json")
 
-      assert Julewire::Rack::Capture::BodyContentType.allowed?(
+      assert_true Julewire::Rack::Capture::BodyContentType.allowed?(
         request,
         selector: Julewire::Rack::Capture::BodyContentType::JSON_ONLY
       )
-      refute Julewire::Rack::Capture::BodyContentType.allowed?(request, selector: nil)
-      refute Julewire::Rack::Capture::BodyContentType.allowed?(double_content_type("image/png"), selector: true)
-      assert Julewire::Rack::Capture::BodyContentType.allowed?(
+      assert_false Julewire::Rack::Capture::BodyContentType.allowed?(request, selector: nil)
+      assert_false Julewire::Rack::Capture::BodyContentType.allowed?(double_content_type("image/png"), selector: true)
+      assert_true Julewire::Rack::Capture::BodyContentType.allowed?(
         double_content_type("text/plain"),
         selector: %w[text/plain]
       )
@@ -38,24 +39,24 @@ module Julewire
     def test_body_content_type_selector_and_binary_edges
       capture = Julewire::Rack::Capture::BodyContentType
 
-      assert capture.allowed?(double_content_type("TEXT/PLAIN; charset=utf-8"), selector: "text/plain")
-      assert capture.allowed?(double_content_type("text/plain"), selector: " TEXT/PLAIN ; charset=utf-8")
-      assert capture.allowed?(double_content_type(nil), selector: true)
-      assert_same false, capture.allowed?(double_content_type("false"), selector: false)
-      refute capture.allowed?(double_content_type(nil), selector: "text/plain")
-      refute capture.allowed?(double_content_type("text/plain"), selector: false)
-      refute capture.allowed?(double_content_type("text/plain"), selector: :json)
+      assert_true capture.allowed?(double_content_type("TEXT/PLAIN; charset=utf-8"), selector: "text/plain")
+      assert_true capture.allowed?(double_content_type("text/plain"), selector: " TEXT/PLAIN ; charset=utf-8")
+      assert_true capture.allowed?(double_content_type(nil), selector: true)
+      assert_false capture.allowed?(double_content_type("false"), selector: false)
+      assert_false capture.allowed?(double_content_type(nil), selector: "text/plain")
+      assert_false capture.allowed?(double_content_type("text/plain"), selector: false)
+      assert_false capture.allowed?(double_content_type("text/plain"), selector: :json)
     end
 
     def test_body_content_type_regex_and_binary_edges
       capture = Julewire::Rack::Capture::BodyContentType
 
-      assert capture.allowed?(double_content_type("application/activity+json"), selector: /\+json\z/)
-      refute capture.allowed?(double_content_type("text/plain"), selector: /json/)
-      refute capture.allowed?(double_content_type("application/pdf"), selector: true)
-      refute capture.allowed?(double_content_type("audio/mpeg"), selector: true)
-      refute capture.allowed?(double_content_type(nil), selector: /^$/)
-      assert capture.binary?(object_stringified_as("image/png"))
+      assert_true capture.allowed?(double_content_type("application/activity+json"), selector: /\+json\z/)
+      assert_false capture.allowed?(double_content_type("text/plain"), selector: /json/)
+      assert_false capture.allowed?(double_content_type("application/pdf"), selector: true)
+      assert_false capture.allowed?(double_content_type("audio/mpeg"), selector: true)
+      assert_false capture.allowed?(double_content_type(nil), selector: /^$/)
+      assert_true capture.binary?(object_stringified_as("image/png"))
     end
 
     def test_body_content_type_reader_priority_and_header_variants
@@ -96,6 +97,10 @@ module Julewire
       assert_nil capture.header_content_type(nil)
       assert_nil capture.header_value({}, "content-type")
     end
+  end
+
+  class TestCaptureRequestBody < CaptureTestCase
+    cover Julewire::Rack::Capture::RequestBody
 
     def test_request_body_capture_standard_and_truncated_edges
       request = json_request('{"ok":true}', content_type: "application/vnd.api+json")
@@ -140,8 +145,33 @@ module Julewire
           body: raising_read_stream
         )
 
-        assert_captured_request_body(request, body, limit: limit)
+        assert_equal expected_request_body(body), stringify_keys(request_body_fields(request, limit: limit))
       end
+    end
+
+    def test_request_body_capture_caps_raw_post_even_when_content_length_is_too_small
+      request = double_raw_post_with_body_stream(
+        raw_post: "abcdef",
+        content_length: "3",
+        body: raising_read_stream
+      )
+
+      assert_equal(
+        { "request_body" => "abc", "request_body_bytes" => 6, "request_body_truncated" => true },
+        stringify_keys(request_body_fields(request, limit: 3))
+      )
+    end
+
+    def test_request_body_capture_uses_actual_bytes_when_content_length_is_too_large
+      assert_equal expected_json_request_body, json_request_body_fields(content_length: "999", limit: 20)
+    end
+
+    def test_request_body_capture_uses_actual_bytes_at_exact_limit_with_inflated_content_length
+      assert_equal expected_json_request_body, json_request_body_fields(content_length: "999", limit: 11)
+    end
+
+    def test_request_body_capture_uses_actual_bytes_when_fast_path_content_length_is_inflated
+      assert_equal expected_json_request_body, json_request_body_fields(content_length: "20", limit: 20)
     end
 
     def test_request_body_capture_uses_bounded_stream_when_content_length_exceeds_limit
@@ -174,34 +204,40 @@ module Julewire
     def test_request_body_capture_reads_stream_without_position_support
       request = double_body(no_position_stream("body"))
 
-      assert_captured_request_body(request, "body", limit: nil)
+      assert_equal expected_request_body("body"), stringify_keys(request_body_fields(request, limit: nil))
+    end
+
+    def test_request_body_capture_reads_bounded_stream_without_position_support
+      request = double_body(no_position_stream("body"))
+
+      assert_equal expected_request_body("body"), stringify_keys(request_body_fields(request, limit: 10))
     end
 
     def test_request_body_capture_coerces_stream_read_value_with_to_str
       request = double_body(no_position_stream(string_like("body")))
 
-      assert_captured_request_body(request, "body", limit: nil)
+      assert_equal expected_request_body("body"), stringify_keys(request_body_fields(request, limit: nil))
     end
 
     def test_request_body_capture_does_not_restore_missing_position
       stream = no_position_writer_stream("body")
       request = double_body(stream)
 
-      assert_captured_request_body(request, "body", limit: nil)
+      assert_equal expected_request_body("body"), stringify_keys(request_body_fields(request, limit: nil))
       assert_empty stream.assigned_positions
     end
 
     def test_request_body_capture_contains_position_restore_failure
       request = double_body(failing_position_restore_stream("body"))
 
-      assert_captured_request_body(request, "body", limit: nil)
+      assert_equal expected_request_body("body"), stringify_keys(request_body_fields(request, limit: nil))
     end
 
     def test_request_body_capture_reads_stream_without_rewind_support
       stream = no_rewind_position_stream("body")
       request = double_body(stream)
 
-      assert_captured_request_body(request, "body", limit: nil)
+      assert_equal expected_request_body("body"), stringify_keys(request_body_fields(request, limit: nil))
       assert_equal 0, stream.pos
     end
 
@@ -220,8 +256,10 @@ module Julewire
       zero_stream = limit_tracking_stream("zero")
       negative_stream = limit_tracking_stream("negative")
 
-      assert_captured_request_body(double_body(zero_stream, content_length: "0"), "zero", limit: 10)
-      assert_captured_request_body(double_body(negative_stream, content_length: "-1"), "negative", limit: 10)
+      assert_equal expected_request_body("zero"),
+                   stringify_keys(request_body_fields(double_body(zero_stream, content_length: "0"), limit: 10))
+      assert_equal expected_request_body("negative"),
+                   stringify_keys(request_body_fields(double_body(negative_stream, content_length: "-1"), limit: 10))
       assert_equal [11], zero_stream.limits
       assert_equal [11], negative_stream.limits
     end
@@ -240,16 +278,13 @@ module Julewire
       )
     end
 
-    def test_request_body_capture_does_not_mark_under_limit_body_as_truncated
-      request = json_request('{"ok":true}')
+    def test_request_body_capture_does_not_mark_under_or_exact_limit_body_as_truncated
+      [20, 11].each do |limit|
+        request = json_request('{"ok":true}')
 
-      assert_captured_request_body(request, '{"ok":true}', bytes: 11, limit: 20)
-    end
-
-    def test_request_body_capture_does_not_mark_exact_limit_body_as_truncated
-      request = json_request('{"ok":true}')
-
-      assert_captured_request_body(request, '{"ok":true}', bytes: 11, limit: 11)
+        assert_equal expected_request_body('{"ok":true}', bytes: 11),
+                     stringify_keys(request_body_fields(request, limit: limit))
+      end
     end
 
     def test_request_body_capture_omits_empty_untruncated_body
@@ -306,10 +341,10 @@ module Julewire
         mode: Julewire::Rack::Capture::Settings::JSON_BODY
       )
 
-      assert fields.fetch(:request_body_json).fetch("ok")
+      assert_true fields.fetch(:request_body_json).fetch("ok")
       assert_equal [{ "id" => 1 }], fields.fetch(:request_body_json).fetch("items")
       assert_equal 30, fields.fetch(:request_body_bytes)
-      refute fields.fetch(:request_body_truncated)
+      assert_false fields.fetch(:request_body_truncated)
       refute_includes fields, :request_body
     end
 
@@ -323,7 +358,7 @@ module Julewire
       )
 
       assert_equal 11, truncated.fetch(:request_body_bytes)
-      assert truncated.fetch(:request_body_truncated)
+      assert_true truncated.fetch(:request_body_truncated)
       refute_includes truncated, :request_body
       refute_includes truncated, :request_body_json
     end
@@ -352,6 +387,10 @@ module Julewire
       )
       assert_equal 1, body.rewind_count
     end
+  end
+
+  class TestCaptureBufferedResponseBody < CaptureTestCase
+    cover Julewire::Rack::Capture::BufferedResponseBody
 
     def test_response_body_capture_edges
       response = response_double(body: "hello", stream: ["hello"], headers: { "content-type" => "application/json" })
@@ -368,21 +407,130 @@ module Julewire
       file_stream = Object.new
       file_stream.define_singleton_method(:to_path) { "/tmp/file" }
 
-      assert_empty Julewire::Rack::Capture::BufferedResponseBody.call(
-        response_double(body: "hello", stream: file_stream), content_types: true, limit: 10
-      )
-      assert_empty Julewire::Rack::Capture::BufferedResponseBody.call(
-        response_double(body: "hello", stream: Object.new), content_types: true, limit: 10
-      )
-      assert_empty Julewire::Rack::Capture::BufferedResponseBody.call(
-        response_double(body: Object.new, stream: []), content_types: true, limit: 10
-      )
-      assert_empty Julewire::Rack::Capture::BufferedResponseBody.call(Object.new, content_types: true, limit: 10)
+      assert_empty response_body_fields(response_double(body: "hello", stream: file_stream), limit: 10)
+      assert_empty response_body_fields(response_double(body: "hello", stream: Object.new), limit: 10)
+      assert_empty response_body_fields(response_double(body: Object.new, stream: []), limit: 10)
+      assert_empty response_body_fields(Object.new, limit: 10)
       assert_equal(
         { "response_body" => "hello", "response_body_bytes" => 5, "response_body_truncated" => false },
         stringify_keys(response_body_fields(response, limit: nil))
       )
     end
+
+    def test_response_body_capture_requires_allowed_content_type_before_reading_stream
+      response = response_double(body: "ignored", stream: ["visible"], headers: { "content-type" => "text/plain" })
+
+      assert_empty response_body_fields(
+        response,
+        content_types: Julewire::Rack::Capture::BodyContentType::JSON_ONLY,
+        limit: nil
+      )
+    end
+
+    def test_response_body_capture_allows_json_media_type_selector
+      response = response_double(
+        body: "ignored",
+        stream: ["visible"],
+        headers: { "content-type" => "application/vnd.api+json" }
+      )
+
+      assert_equal(
+        { "response_body" => "visible", "response_body_bytes" => 7, "response_body_truncated" => false },
+        stringify_keys(
+          response_body_fields(
+            response,
+            content_types: Julewire::Rack::Capture::BodyContentType::JSON_ONLY,
+            limit: nil
+          )
+        )
+      )
+    end
+
+    def test_response_body_capture_skips_file_like_streams_even_when_array_like
+      stream = Object.new
+      stream.define_singleton_method(:to_path) { "/tmp/response-body" }
+      stream.define_singleton_method(:to_ary) { ["should not capture"] }
+
+      assert_empty response_body_fields(
+        response_double(body: "ignored", stream: stream),
+        limit: 10
+      )
+    end
+
+    def test_response_body_capture_skips_non_string_parts_and_keeps_reading
+      response = response_double(
+        body: "ignored",
+        stream: ["a", Object.new, string_like("b")],
+        headers: { "content-type" => "application/json" }
+      )
+
+      assert_equal(
+        { "response_body" => "ab", "response_body_bytes" => 2, "response_body_truncated" => false },
+        stringify_keys(response_body_fields(response, limit: 10))
+      )
+    end
+
+    def test_response_body_capture_tracks_exact_limit_across_parts
+      response = response_double(
+        body: "ignored",
+        stream: %w[ab c d],
+        headers: { "content-type" => "application/json" }
+      )
+
+      assert_equal(
+        { "response_body" => "abc", "response_body_bytes" => 4, "response_body_truncated" => true },
+        stringify_keys(response_body_fields(response, limit: 3))
+      )
+    end
+
+    def test_response_body_capture_marks_multi_part_under_limit_as_not_truncated
+      response = response_double(
+        body: "ignored",
+        stream: %w[ab cd],
+        headers: { "content-type" => "application/json" }
+      )
+
+      assert_equal(
+        { "response_body" => "abcd", "response_body_bytes" => 4, "response_body_truncated" => false },
+        stringify_keys(response_body_fields(response, limit: 10))
+      )
+    end
+  end
+
+  class TestCaptureSettings < CaptureTestCase
+    cover Julewire::Rack::Capture::Settings
+
+    def test_capture_settings_body_modes_enabled_predicate_and_validation
+      settings = Julewire::Rack::Capture::Settings.new
+
+      refute_predicate settings, :enabled?
+      assert_equal Julewire::Rack::Capture::Settings::STRING_BODY, settings.body_mode
+
+      settings.headers = true
+
+      assert_predicate settings, :enabled?
+
+      settings.headers = false
+      settings.body = true
+
+      assert_predicate settings, :enabled?
+      assert_equal Julewire::Rack::Capture::Settings::STRING_BODY, settings.body_mode
+
+      settings.body = :json
+
+      assert_equal Julewire::Rack::Capture::Settings::JSON_BODY, settings.body_mode
+
+      settings.body = "json"
+
+      assert_equal Julewire::Rack::Capture::Settings::JSON_BODY, settings.body_mode
+
+      error = assert_raises(Julewire::Rack::Error) { settings.body = "yes" }
+      assert_equal "body must be false, true, or :json", error.message
+    end
+  end
+
+  class TestCaptureBufferedResponseBodySinglePart < CaptureTestCase
+    cover Julewire::Rack::Capture::BufferedResponseBody
 
     def test_response_body_capture_reuses_unlimited_single_string_part
       body = "hello"
@@ -392,7 +540,36 @@ module Julewire
 
       assert_same body, fields.fetch(:response_body)
       assert_equal 5, fields.fetch(:response_body_bytes)
-      refute fields.fetch(:response_body_truncated)
+      assert_false fields.fetch(:response_body_truncated)
+    end
+
+    def test_response_body_capture_reuses_unlimited_single_string_like_part
+      response = response_double(
+        body: "ignored",
+        stream: [string_like("hello")],
+        headers: { "content-type" => "application/json" }
+      )
+
+      assert_equal(
+        { "response_body" => "hello", "response_body_bytes" => 5, "response_body_truncated" => false },
+        stringify_keys(response_body_fields(response, limit: nil))
+      )
+    end
+
+    def test_response_body_capture_keeps_unlimited_single_empty_part
+      response = response_double(body: "ignored", stream: [""], headers: { "content-type" => "application/json" })
+
+      assert_empty response_body_fields(response, limit: nil)
+    end
+
+    def test_response_body_capture_contains_unlimited_single_non_string_part
+      response = response_double(
+        body: "ignored",
+        stream: [Object.new],
+        headers: { "content-type" => "application/json" }
+      )
+
+      assert_empty response_body_fields(response, limit: nil)
     end
 
     def test_response_body_capture_json_mode_parses_without_emitting_raw_body
@@ -408,10 +585,10 @@ module Julewire
         mode: Julewire::Rack::Capture::Settings::JSON_BODY
       )
 
-      assert fields.fetch(:response_body_json).fetch("ok")
+      assert_true fields.fetch(:response_body_json).fetch("ok")
       assert_equal [1, 2], fields.fetch(:response_body_json).fetch("items")
       assert_equal 25, fields.fetch(:response_body_bytes)
-      refute fields.fetch(:response_body_truncated)
+      assert_false fields.fetch(:response_body_truncated)
       refute_includes fields, :response_body
     end
 
@@ -429,7 +606,7 @@ module Julewire
       )
 
       assert_equal 11, truncated.fetch(:response_body_bytes)
-      assert truncated.fetch(:response_body_truncated)
+      assert_true truncated.fetch(:response_body_truncated)
       refute_includes truncated, :response_body
       refute_includes truncated, :response_body_json
     end
@@ -467,7 +644,9 @@ module Julewire
 
       assert_empty Julewire::Rack::Capture::BufferedResponseBody.call(response, content_types: true, limit: 10)
     end
+  end
 
+  module CaptureFixtures
     private
 
     def json_header = "application/json; charset=utf-8"
@@ -488,14 +667,23 @@ module Julewire
       Julewire::Rack::Capture::RequestBody.call(request, content_types: true, mode: mode, **)
     end
 
-    def response_body_fields(response, **)
-      Julewire::Rack::Capture::BufferedResponseBody.call(response, content_types: true, **)
+    def response_body_fields(response, content_types: true, **)
+      Julewire::Rack::Capture::BufferedResponseBody.call(response, content_types:, **)
     end
 
-    def assert_captured_request_body(request, body, bytes: body.bytesize, truncated: false, **)
-      assert_equal(
-        { "request_body" => body, "request_body_bytes" => bytes, "request_body_truncated" => truncated },
-        stringify_keys(request_body_fields(request, **))
+    def expected_request_body(body, bytes: body.bytesize, truncated: false)
+      { "request_body" => body, "request_body_bytes" => bytes, "request_body_truncated" => truncated }
+    end
+
+    def expected_json_request_body
+      { "request_body_json" => { "ok" => true }, "request_body_bytes" => 11, "request_body_truncated" => false }
+    end
+
+    def json_request_body_fields(content_length:, limit:)
+      request = double_body_with_header_length(StringIO.new('{"ok":true}'), content_length)
+
+      stringify_keys(
+        request_body_fields(request, limit: limit, mode: Julewire::Rack::Capture::Settings::JSON_BODY)
       )
     end
 
@@ -728,4 +916,6 @@ module Julewire
       hash.transform_keys(&:to_s)
     end
   end
+
+  CaptureTestCase.include(CaptureFixtures)
 end

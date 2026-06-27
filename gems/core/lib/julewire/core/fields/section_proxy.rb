@@ -34,7 +34,7 @@ module Julewire
 
         def to_h = section_hash
 
-        def [](key) = nil_if_missing(section_value(key, default: MISSING))
+        def [](key) = call_store(:value, key, default: nil)
 
         private
 
@@ -51,10 +51,6 @@ module Julewire
           yield coerce_fields(fields, keyword_fields)
         end
 
-        def nil_if_missing(value)
-          value.equal?(MISSING) ? nil : value
-        end
-
         def add_section(fields)
           call_store(:add, fields)
         end
@@ -65,10 +61,6 @@ module Julewire
 
         def section_hash
           call_store(:hash)
-        end
-
-        def section_value(key, default:)
-          call_store(:value, key, default: default)
         end
 
         def call_store(action, ...)

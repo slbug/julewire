@@ -19,7 +19,7 @@ module Julewire
         end
 
         def remove(key)
-          Fields::Internal.delete_key!(@fields, key)
+          Internal.delete_key!(@fields, key)
           self
         end
 

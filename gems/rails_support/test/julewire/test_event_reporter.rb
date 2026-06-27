@@ -3,14 +3,21 @@
 require "test_helper"
 
 module Julewire
-  class TestRailsSupportEventReporter < Minitest::Test
-    cover Julewire::RailsSupport::EventReporter
+  class RailsSupportEventReporterTestCase < Minitest::Test; end
+
+  class TestRailsSupportEventReporterSubscription < RailsSupportEventReporterTestCase
+    cover "Julewire::RailsSupport::EventReporter.subscribe"
+    cover "Julewire::RailsSupport::EventReporter.subscribable?"
+    cover "Julewire::RailsSupport::EventReporter.unsubscriber"
 
     def test_unsubscriber_uses_reporter_unsubscribe_when_available
       reporter = Object.new
       subscriber = Object.new
       unsubscribed = []
-      reporter.define_singleton_method(:unsubscribe) { unsubscribed << it }
+      reporter.define_singleton_method(:unsubscribe) do |subscriber|
+        unsubscribed << subscriber
+        nil
+      end
 
       Julewire::RailsSupport::EventReporter.unsubscriber(reporter, subscriber).call
 
@@ -39,24 +46,41 @@ module Julewire
     end
 
     def test_subscribe_ignores_reporters_without_subscribe
-      refute Julewire::RailsSupport::EventReporter.subscribable?(Object.new)
+      assert_false Julewire::RailsSupport::EventReporter.subscribable?(Object.new)
       assert_nil Julewire::RailsSupport::EventReporter.subscribe(Object.new, Object.new)
     end
+  end
 
-    def test_default_prefers_rails_event_reporter
-      assert_default_reporter_from_constant(:Rails, :event)
+  class TestRailsSupportEventReporterDefault < RailsSupportEventReporterTestCase
+    cover "Julewire::RailsSupport::EventReporter.default"
+    cover "Julewire::RailsSupport::LogSubscribers.constantize"
+
+    def test_default_prefers_framework_event_reporters
+      { Rails: :event, ActiveSupport: :event_reporter }.each do |constant_name, method_name|
+        reporter = Object.new
+        framework = module_with_singleton_value(method_name, reporter)
+
+        with_object_constant(constant_name, framework) do
+          assert_same reporter, Julewire::RailsSupport::EventReporter.default
+        end
+      end
     end
 
-    def test_default_reads_top_level_rails_event_reporter
-      assert_default_reads_top_level_constant(:Rails, :event)
-    end
+    def test_default_reads_top_level_framework_event_reporters
+      { Rails: :event, ActiveSupport: :event_reporter }.each do |constant_name, method_name|
+        reporter = Object.new
+        nested_shadow = module_with_singleton_value(method_name, Object.new)
+        namespace_shadow = Module.new
+        top_level = module_with_singleton_value(method_name, reporter)
 
-    def test_default_falls_back_to_active_support_event_reporter
-      assert_default_reporter_from_constant(:ActiveSupport, :event_reporter)
-    end
-
-    def test_default_reads_top_level_active_support_event_reporter
-      assert_default_reads_top_level_constant(:ActiveSupport, :event_reporter)
+        with_nested_constant(Julewire::RailsSupport::EventReporter, constant_name, nested_shadow) do
+          with_nested_constant(Julewire, constant_name, namespace_shadow) do
+            with_object_constant(constant_name, top_level) do
+              assert_same reporter, Julewire::RailsSupport::EventReporter.default
+            end
+          end
+        end
+      end
     end
 
     def test_default_uses_active_support_when_rails_has_no_event_reporter
@@ -85,6 +109,11 @@ module Julewire
         assert_nil Julewire::RailsSupport::EventReporter.default
       end
     end
+  end
+
+  class TestRailsSupportEventReporterLogSubscriber < RailsSupportEventReporterTestCase
+    cover "Julewire::RailsSupport::EventReporter.log_subscriber?"
+    cover "Julewire::RailsSupport::EventReporter.unsubscribe_log_subscriber"
 
     def test_unsubscribe_log_subscriber_removes_active_support_log_subscriber
       reporter = Object.new
@@ -204,32 +233,10 @@ module Julewire
 
       assert_empty unsubscribed
     end
+  end
 
+  module RailsSupportEventReporterFixtures
     private
-
-    def assert_default_reporter_from_constant(constant_name, method_name)
-      reporter = Object.new
-      value = module_with_singleton_value(method_name, reporter)
-
-      with_object_constant(constant_name, value) do
-        assert_same reporter, Julewire::RailsSupport::EventReporter.default
-      end
-    end
-
-    def assert_default_reads_top_level_constant(constant_name, method_name)
-      reporter = Object.new
-      nested_shadow = module_with_singleton_value(method_name, Object.new)
-      namespace_shadow = Module.new
-      top_level = module_with_singleton_value(method_name, reporter)
-
-      with_nested_constant(Julewire::RailsSupport::EventReporter, constant_name, nested_shadow) do
-        with_nested_constant(Julewire, constant_name, namespace_shadow) do
-          with_object_constant(constant_name, top_level) do
-            assert_same reporter, Julewire::RailsSupport::EventReporter.default
-          end
-        end
-      end
-    end
 
     def module_with_singleton_value(method_name, value)
       Module.new.tap do |mod|
@@ -262,6 +269,62 @@ module Julewire
     ensure
       parent.__send__(:remove_const, name) if parent.const_defined?(name, false)
       parent.const_set(name, previous) if had_constant
+    end
+  end
+
+  RailsSupportEventReporterTestCase.include(RailsSupportEventReporterFixtures)
+
+  class TestRailsSupportLogSubscribers < Minitest::Test
+    cover Julewire::RailsSupport::LogSubscribers
+
+    def test_detaches_and_unsubscribes_exact_subscriber_classes
+      detached = []
+      log_subscriber = Class.new
+      detachable_subscriber = Class.new(log_subscriber) do
+        define_singleton_method(:detach_from) { |namespace| detached << namespace }
+      end
+      plain_subscriber = Class.new(log_subscriber)
+      unsubscribed = []
+      reporter = Object.new
+      reporter.define_singleton_method(:unsubscribe) do |subscriber|
+        unsubscribed << subscriber
+        nil
+      end
+      event_reporter = Module.new
+      event_reporter.const_set(:LogSubscriber, log_subscriber)
+      active_support = Module.new
+      active_support.const_set(:EventReporter, event_reporter)
+      active_support.define_singleton_method(:event_reporter) { reporter }
+      previous = Object.const_get(:ActiveSupport, false) if Object.const_defined?(:ActiveSupport, false)
+      Object.__send__(:remove_const, :ActiveSupport) if previous
+      Object.const_set(:ActiveSupport, active_support)
+
+      begin
+        assert_nil Julewire::RailsSupport::LogSubscribers.detach(nil, :active_job)
+        assert_nil Julewire::RailsSupport::LogSubscribers.detach(plain_subscriber, :active_job)
+        assert_nil Julewire::RailsSupport::LogSubscribers.detach(detachable_subscriber, :active_job)
+      ensure
+        Object.__send__(:remove_const, :ActiveSupport)
+        Object.const_set(:ActiveSupport, previous) if previous
+      end
+
+      assert_equal [:active_job], detached
+      assert_equal [plain_subscriber, detachable_subscriber], unsubscribed
+    end
+
+    def test_constantizes_only_top_level_constants
+      constant = Module.new
+      name = :RailsSupportProbe
+      previous = Object.const_get(name, false) if Object.const_defined?(name, false)
+      Object.__send__(:remove_const, name) if previous
+      Object.const_set(name, constant)
+
+      assert_same constant, Julewire::RailsSupport::LogSubscribers.constantize(name)
+
+      assert_nil Julewire::RailsSupport::LogSubscribers.constantize(:MissingRailsSupportProbe)
+    ensure
+      Object.__send__(:remove_const, name) if name && Object.const_defined?(name, false)
+      Object.const_set(name, previous) if name && previous
     end
   end
 end

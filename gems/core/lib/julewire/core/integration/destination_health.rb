@@ -10,7 +10,6 @@ module Julewire
           @state = Diagnostics::Health.new(
             callback_failure_counter: callback_failure_counter,
             counter_keys: counter_keys,
-            failure_counter: failure_counter,
             track_failures: failure_counter == :failures
           )
         end
@@ -20,20 +19,31 @@ module Julewire
         end
 
         def record_failure(error, counter: @failure_counter, **metadata)
-          @state.record_failure(error, counter: counter, degrade: false, **metadata)
+          @state.record_failure(error, counter: counter, **metadata)
         end
 
         def record_loss(reason:, counter: reason, **metadata)
-          @state.record_loss(reason: reason, counter: counter, degrade: false, **metadata)
+          @state.record_loss(reason: reason, counter: counter, **metadata)
         end
 
         def record_callback_failure(callback_failure)
           @state.record_callback_failure(callback_failure)
         end
 
-        def clear_degraded! = @state.clear_failures!
+        def degradation_marker = @state.degradation_marker
 
-        def degraded? = @state.degraded?(status_from: :failure_or_loss)
+        def clear_degradation_if_unchanged(marker) = @state.clear_degradation_if_unchanged(marker)
+
+        def recover_if_successful
+          marker = degradation_marker
+          result = yield
+          clear_degradation_if_unchanged(marker) unless result == false
+          result
+        end
+
+        def clear_failures! = @state.clear_failures!
+
+        def degraded? = @state.degraded?
 
         def last_callback_failure = @state.last_callback_failure
 
@@ -42,8 +52,8 @@ module Julewire
         def last_failure = @state.last_failure
 
         def snapshot(status: nil, **fields)
-          snapshot = @state.snapshot(status: status, status_from: :failure_or_loss, include_loss: true, **fields)
-          callback_failure = @state.last_callback_failure
+          snapshot = @state.snapshot(status: status, include_loss: true, **fields)
+          callback_failure = last_callback_failure
           return snapshot unless callback_failure
 
           snapshot.merge(last_callback_failure: callback_failure).freeze

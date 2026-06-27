@@ -26,7 +26,7 @@ module Julewire
           def value(input, key, default: nil)
             return default unless hash_input?(input)
             return input[key] if input.key?(key)
-            return input[key.to_s] if input.key?(key.to_s)
+            return input.fetch(key.to_s) if input.key?(key.to_s)
 
             default
           end

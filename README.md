@@ -127,6 +127,13 @@ The root `Rakefile` can orchestrate all gem tasks from a Ruby environment with
 the gem bundles installed. Rails Appraisal suites live in `gems/rails`; the
 Ractor gem runs on Ruby 4.0 only.
 
+All gem suites load `minitest-strict` directly. Use `assert_true` and
+`assert_false` for exact Boolean contracts, and `assert_eql` or `refute_eql`
+when equality must also preserve type. Keep ordinary `assert` or `refute` only
+for deliberate truthiness or presence checks; prefer an exact value, nil, key,
+or collection assertion when that states the contract more clearly. Do not add
+a shared assertion wrapper or DSL.
+
 ## License
 
 MIT. Each packaged gem includes its own `LICENSE.txt`; the repository-level

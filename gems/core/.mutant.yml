@@ -1,0 +1,71 @@
+---
+usage: opensource
+includes:
+- lib
+- test
+- "../../support/mutant"
+- "../../support/quality"
+requires:
+- mutant
+- ruby_itblock
+- minitest_coverage
+- julewire_repository_tooling
+- julewire-core
+- julewire/core/testing
+hooks:
+- "../../support/mutant/zeitwerk_eager_load.rb"
+integration:
+  name: minitest
+coverage_criteria:
+  process_abort: true
+matcher:
+  subjects:
+  - Julewire.after_fork!
+  - Julewire.attributes
+  - Julewire.carry
+  - Julewire.close
+  - Julewire.config
+  - Julewire.configure
+  - Julewire.context
+  - Julewire.current_execution
+  - Julewire.current_execution?
+  - Julewire.debug
+  - Julewire.dev!
+  - Julewire.doctor
+  - Julewire.emit
+  - Julewire.error
+  - Julewire.fatal
+  - Julewire.fiber
+  - Julewire.flush
+  - Julewire.health
+  - Julewire.info
+  - Julewire.labels
+  - Julewire.measure
+  - Julewire.measure_start
+  - Julewire.observe_self!
+  - Julewire.punk!
+  - Julewire.reset!
+  - Julewire.runtime
+  - Julewire.start_execution
+  - Julewire.summary
+  - Julewire.tail
+  - Julewire.thread
+  - Julewire.unknown
+  - Julewire.warn
+  - Julewire.with_execution
+  - Julewire::ConsoleFormatter*
+  - Julewire::Core*
+  - Julewire::Error*
+  - Julewire::JsonEncoder*
+  - Julewire::Match*
+  - Julewire::Mutant::Targets*
+  - Julewire::Quality*
+  - Julewire::Record*
+  - Julewire::RecordDraft*
+  - Julewire::RecordFormatter*
+  - Julewire::Sampling*
+  - Julewire::Serializer*
+  - Julewire::Tail*
+  - Julewire::TailSampling*
+  - Julewire::Testing*
+  - Julewire::TextEncoder*

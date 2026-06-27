@@ -6,15 +6,16 @@ module Julewire
       module Metadata
         class << self
           def call(record)
-            return {} unless record.respond_to?(:key?) && record.respond_to?(:[])
-
+            labels = record[:labels]
             {
               event: record[:event],
-              labels: record[:labels].is_a?(Hash) ? Fields::FieldSet.deep_dup(record[:labels]) : {},
+              labels: labels.is_a?(Hash) ? Fields::FieldSet.deep_dup(labels) : {},
               logger: record[:logger],
               severity: record[:severity],
               source: record[:source]
             }.compact
+          rescue StandardError
+            {}
           end
         end
       end

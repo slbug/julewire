@@ -49,7 +49,6 @@ module Julewire
 
           entry = build_entry(processor, arguments, options)
           prepend ? @entries.unshift(entry) : @entries << entry
-          self
         end
 
         def build_entry(processor, arguments = [], options = {})
@@ -66,7 +65,7 @@ module Julewire
               on_error: on_error,
               factory: true
             )
-          elsif processor.is_a?(Class)
+          elsif processor.instance_of?(Class)
             Entry.new(
               entry: processor,
               arguments: arguments.dup.freeze,
@@ -81,13 +80,13 @@ module Julewire
         end
 
         def normalize_entry(entry)
-          entry.is_a?(Entry) ? entry : build_entry(entry)
+          entry.instance_of?(Entry) ? entry : build_entry(entry)
         end
 
         def materialize(entry)
           processor = if entry.factory
                         Processing.build(entry.entry, *entry.arguments, **entry.options)
-                      elsif entry.entry.is_a?(Class)
+                      elsif entry.entry.instance_of?(Class)
                         entry.entry.new(*entry.arguments, **entry.options)
                       else
                         entry.entry

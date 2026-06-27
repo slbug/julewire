@@ -6,6 +6,15 @@ require "stringio"
 
 module Julewire
   class TestConfiguration < Minitest::Test
+    cover Julewire::Core::Configuration
+    cover "Julewire::Core::FacadeMethods#config"
+    cover "Julewire::Core::FacadeMethods#configure"
+    cover "Julewire::Core::Runtime#configure"
+    cover "Julewire::Core::Runtime#configure_transaction"
+    cover "Julewire::Core::Runtime#labels"
+    cover Julewire::Core::Destinations::Registry
+    cover Julewire::Core::Fields::StaticLabels
+    cover Julewire::Core::Processing::ProcessorRegistry
     class CapturingFormatter
       attr_reader :records
 
@@ -41,6 +50,75 @@ module Julewire
       assert_empty Julewire.config.processors.to_a
     end
 
+    def test_configuration_defaults_are_explicit
+      config = Julewire::Core::Configuration.new
+
+      assert_instance_of Julewire::Core::Destinations::Registry, config.destinations
+      assert_instance_of Julewire::Core::Fields::StaticLabels, config.labels
+      assert_instance_of Julewire::Core::Processing::ProcessorRegistry, config.processors
+      assert_false config.emit_non_standard_exception_summaries
+      assert_equal Julewire::Core::MAX_BACKTRACE_LINES, config.error_backtrace_lines
+      assert_equal :debug, config.level
+      assert_nil config.on_drop
+      assert_nil config.on_failure
+      assert_equal 1, config.pipeline_close_timeout
+    end
+
+    def test_configuration_copy_preserves_non_default_scalar_and_callback_options
+      on_drop = ->(*) {}
+      on_failure = ->(*) {}
+      config = Julewire::Core::Configuration.new(
+        emit_non_standard_exception_summaries: true,
+        error_backtrace_lines: 3,
+        level: :error,
+        on_drop: on_drop,
+        on_failure: on_failure,
+        pipeline_close_timeout: 0.25
+      )
+
+      copy = config.copy
+
+      refute_same config, copy
+      assert_predicate config, :emit_non_standard_exception_summaries
+      assert_predicate copy, :emit_non_standard_exception_summaries
+      assert_equal 3, copy.error_backtrace_lines
+      assert_equal :error, copy.level
+      assert_same on_drop, copy.on_drop
+      assert_same on_failure, copy.on_failure
+      assert_in_delta 0.25, copy.pipeline_close_timeout
+    end
+
+    def test_configuration_build_pipeline_uses_explicit_invalid_severity_reporter
+      reports = []
+      reporter = Object.new
+      reporter.define_singleton_method(:call) { |value| reports << value }
+      config = Julewire::Core::Configuration.new
+      configure_destination(config, output: StringIO.new)
+
+      config.build_pipeline(invalid_severity_reporter: reporter).emit(severity: Object.new, message: "bad")
+
+      assert_equal 1, reports.length
+      assert_instance_of Object, reports.fetch(0)
+    end
+
+    def test_configuration_build_pipeline_default_reports_invalid_severities_to_runtime_counter
+      reporter = Julewire::Core::Diagnostics::InvalidSeverityReporter
+      counter = reporter.counter
+      config = Julewire::Core::Configuration.new
+      configure_destination(config, output: StringIO.new)
+
+      counter.reset!
+      with_overridden_singleton_method(reporter, :counter, proc { counter }) do
+        with_overridden_singleton_method(reporter, :warn_once, proc { |_metadata| }) do
+          config.build_pipeline.emit(severity: Object.new, message: "bad severity")
+        end
+      end
+
+      assert_equal({ count: 1 }, counter.health)
+    ensure
+      counter&.reset!
+    end
+
     def test_configuration_rejects_unknown_constructor_options
       error = assert_raises(ArgumentError) do
         Julewire::Core::Configuration.new(unknown: true)
@@ -73,10 +151,50 @@ module Julewire
       assert_equal "error_backtrace_lines must be a non-negative Integer", error.message
     end
 
+    def test_configuration_validate_returns_self
+      config = Julewire::Core::Configuration.new
+
+      assert_same config, config.validate!
+    end
+
+    def test_configuration_validate_rejects_invalid_pipeline_close_timeout
+      config = Julewire::Core::Configuration.new
+      config.pipeline_close_timeout = Float::INFINITY
+
+      error = assert_raises(ArgumentError) { config.validate! }
+
+      assert_equal "pipeline_close_timeout must be nil or a non-negative finite Numeric", error.message
+    end
+
+    def test_configuration_validate_rejects_invalid_level
+      config = Julewire::Core::Configuration.new
+      config.level = :unsupported
+
+      error = assert_raises(ArgumentError) { config.validate! }
+
+      assert_equal "unsupported severity: :unsupported", error.message
+    end
+
+    def test_configuration_snapshot_is_frozen_normalized_copy
+      config = Julewire::Core::Configuration.new
+      config.level = "INFO"
+
+      snapshot = config.snapshot
+
+      refute_same config, snapshot
+      assert_predicate snapshot, :frozen?
+      assert_equal :info, snapshot.level
+      assert_equal "INFO", config.level
+
+      config.level = :error
+
+      assert_equal :info, snapshot.level
+    end
+
     def test_configure_rejects_invalid_max_record_bytes
       error = assert_raises(ArgumentError) do
         Julewire.configure do |config|
-          configure_destination(config, output: Julewire::Core::TestHelpers::NullOutput.new, max_record_bytes: 0)
+          configure_destination(config, output: Julewire::Testing::NullOutput.new, max_record_bytes: 0)
         end
       end
 
@@ -138,6 +256,18 @@ module Julewire
       end
     end
 
+    def test_configuration_validates_callback_names_directly
+      on_drop_error = assert_raises(ArgumentError) do
+        Core::Configuration.new(on_drop: Object.new).validate!
+      end
+      on_failure_error = assert_raises(ArgumentError) do
+        Core::Configuration.new(on_failure: Object.new).validate!
+      end
+
+      assert_equal "on_drop must respond to #call", on_drop_error.message
+      assert_equal "on_failure must respond to #call", on_failure_error.message
+    end
+
     def test_active_configuration_is_read_only_after_configure
       output = StringIO.new
 
@@ -149,7 +279,9 @@ module Julewire
       assert_predicate config, :frozen?
       assert_instance_of Julewire::Core::Configuration, config
       assert_raises(FrozenError) { Julewire.config.level = :fatal }
+      assert_raises(FrozenError) { Julewire.config.destinations.use(:late, output: StringIO.new) }
       assert_raises(FrozenError) { Julewire.config.labels.add(late: true) }
+      assert_raises(FrozenError) { Julewire.config.processors.use(->(record) { record }) }
       assert_raises(FrozenError) { Julewire.labels.add(late: true) }
 
       Julewire.emit(severity: :debug, message: "still debug")
@@ -157,6 +289,20 @@ module Julewire
 
       assert_equal "debug", record.fetch("severity")
       assert_equal({ "service" => "core" }, record.fetch("labels"))
+    end
+
+    def test_static_labels_mutators_copy_and_freeze_like_ruby_objects
+      labels = Julewire::Core::Fields::StaticLabels.new
+
+      assert_same labels, labels.add(service: "core")
+      copy = labels.to_h
+      copy[:service] = "mutated"
+
+      assert_equal({ service: "core" }, labels.to_h)
+      assert_same labels, labels.remove(:service)
+      assert_empty labels.to_h
+      assert_same labels, labels.freeze
+      assert_predicate labels, :frozen?
     end
 
     def test_configuration_labels_reject_non_hash_values
@@ -173,7 +319,7 @@ module Julewire
       formatter = CapturingFormatter.new
 
       Julewire.configure do |config|
-        configure_destination(config, formatter: formatter, output: Julewire::Core::TestHelpers::NullOutput.new)
+        configure_destination(config, formatter: formatter, output: Julewire::Testing::NullOutput.new)
         config.processors.use TestPayloadProcessor, key: :credential, value: "processed"
       end
 

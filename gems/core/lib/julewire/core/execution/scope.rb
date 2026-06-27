@@ -4,14 +4,11 @@ module Julewire
   module Core
     module Execution
       class Scope
-        EMPTY_HASH = {}.freeze
-        private_constant :EMPTY_HASH
-
         attr_reader :finished_at
 
-        def initialize(type:, id: nil, execution: EMPTY_HASH, execution_owned: false, summary_event: nil, # rubocop:disable Metrics/ParameterLists
-                       summary_severity: nil, summary_source: nil, attributes: EMPTY_HASH, carry: EMPTY_HASH,
-                       context: EMPTY_HASH, labels: EMPTY_HASH, neutral: EMPTY_HASH, parent: nil, started_at: nil)
+        def initialize(type:, id: nil, execution: nil, execution_owned: false, summary_event: nil, # rubocop:disable Metrics/ParameterLists
+                       summary_severity: nil, summary_source: nil, attributes: nil, carry: nil,
+                       context: nil, labels: nil, neutral: nil, parent: nil, started_at: nil)
           @identity = ScopeIdentity.new(
             type: type,
             id: id,
@@ -37,7 +34,7 @@ module Julewire
         def depth = @identity.depth
 
         def execution_hash
-          Fields::FieldSet.deep_dup(frozen_execution_hash)
+          Fields::FieldSet.deep_dup_owned(frozen_execution_hash)
         end
 
         def frozen_execution_hash
@@ -45,7 +42,7 @@ module Julewire
         end
 
         def inheritable_execution_hash
-          Fields::FieldSet.deep_dup(@execution)
+          Fields::FieldSet.deep_dup_owned(@execution)
         end
 
         def context_hash = @fields.context_hash
@@ -96,7 +93,7 @@ module Julewire
           end
         end
 
-        def add_field(section, fields, owned: false)
+        def add_field(section, fields, owned:)
           @fields.add(section, fields, owned: owned)
         end
 
@@ -105,23 +102,22 @@ module Julewire
           @fields.delete(:carry, path)
         end
 
-        def with_field(section, fields, owned: false, &)
-          @fields.with(section, fields, owned: owned, &)
+        def with_field(section, fields, owned: false, **keyword_fields, &)
+          @fields.with(section, fields, owned: owned, **keyword_fields, &)
         end
 
         def with_context(fields = nil, owned: false, **keyword_fields, &)
-          @fields.with(:context, fields, owned: owned, **keyword_fields, &)
+          with_field(:context, fields, owned: owned, **keyword_fields, &)
         end
 
         def with_carry(fields = nil, owned: false, **keyword_fields, &)
-          @fields.with(:carry, fields, owned: owned, **keyword_fields, &)
+          with_field(:carry, fields, owned: owned, **keyword_fields, &)
         end
 
         def without_carry(path, &)
-          normalized_path = Fields::Internal.normalize_path(path)
-          raise ArgumentError, "carry path is required" if normalized_path.empty?
+          raise ArgumentError, "carry path is required" if Fields::Internal.normalize_path(path).empty?
 
-          @fields.without(:carry, normalized_path, &)
+          @fields.without(:carry, path, &)
         end
 
         def add_summary(fields, owned: false)
@@ -149,12 +145,12 @@ module Julewire
         end
 
         def summary_record_input
-          @summary_state.record_input(**summary_record_fields(timestamp: finished_at || frozen_time(Time.now.utc)))
+          @summary_state.record_input(**summary_record_fields(timestamp: frozen_time(Time.now.utc)))
         end
 
         def owned_summary_record_input
           @summary_state.owned_record_input(
-            **summary_record_fields(timestamp: finished_at || frozen_time(Time.now.utc))
+            **summary_record_fields(timestamp: frozen_time(Time.now.utc))
           )
         end
 
@@ -186,7 +182,7 @@ module Julewire
 
         def frozen_time(value) = @identity.frozen_time(value)
 
-        def initialize_state(context:, attributes:, labels:, carry: {}, neutral: {})
+        def initialize_state(context:, attributes:, labels:, carry:, neutral:)
           @fields = ScopeFields.new(
             context: context,
             carry: carry,
@@ -194,7 +190,6 @@ module Julewire
             labels: labels,
             neutral: neutral
           )
-          @finished_at = nil
         end
 
         def summary_state(event, severity, source)

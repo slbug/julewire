@@ -28,7 +28,7 @@ module Julewire
         end
 
         def reset!
-          @config = build_config
+          @config = nil
         end
 
         private
@@ -38,9 +38,10 @@ module Julewire
         end
 
         def validate_config!(configuration)
-          return if configuration.is_a?(configuration_class)
+          klass = configuration_class
+          return if configuration.is_a?(klass)
 
-          raise TypeError, "expected #{configuration_class.name}"
+          raise TypeError, "expected #{klass}"
         end
 
         def configuration_class

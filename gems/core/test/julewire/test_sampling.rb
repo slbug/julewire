@@ -4,8 +4,9 @@ require "test_helper"
 
 module Julewire
   class TestSampling < Minitest::Test
+    cover Julewire::Sampling
     cover Julewire::Core::Processing::Sampling
-
+    cover "Julewire::Core::Processing::ProcessorChain*"
     def test_head_sampler_keeps_all_at_rate_one
       sampler = Julewire::Sampling.head(rate: 1)
 
@@ -16,6 +17,20 @@ module Julewire
       sampler = Julewire::Sampling.head(rate: 0)
 
       assert_equal :drop, sampler.call(draft_for("same-key"))
+    end
+
+    def test_head_sampler_rate_zero_drops_without_reading_key
+      sampler = Julewire::Sampling.head(rate: 0, key: ->(_draft) { raise "key should not be read" })
+
+      assert_equal :drop, sampler.call(draft_for("same-key"))
+    end
+
+    def test_head_sampler_rate_one_keeps_without_hashing_key
+      opaque_key = Object.new
+      def opaque_key.inspect = raise("key should not be hashed")
+      sampler = Julewire::Sampling.head(rate: 1, key: ->(_draft) { opaque_key })
+
+      assert_nil sampler.call(draft_for("same-key"))
     end
 
     def test_head_sampler_is_deterministic_for_custom_keys
@@ -34,6 +49,75 @@ module Julewire
       second = sampler.call(draft_for("different-message", execution: { type: :request, id: "exec-1" }))
 
       assert_equal first, second
+    end
+
+    def test_head_sampler_default_key_prefers_lineage_root_id
+      sampler = Julewire::Sampling.head(rate: 0.5)
+      draft = Julewire::RecordDraft.build(
+        {
+          execution: {
+            type: "job",
+            id: "request-2",
+            root: { type: "request", id: "root-1" },
+            depth: 2
+          },
+          message: "sampled"
+        },
+        context: { request_id: "request-2" },
+        scope: nil
+      )
+
+      assert_equal :drop, sampler.call(draft)
+    end
+
+    def test_head_sampler_default_key_prefers_execution_id_without_lineage
+      sampler = Julewire::Sampling.head(rate: 0.5)
+      draft = hash_draft(
+        execution: { type: :request, id: "request-1" },
+        context: { request_id: "request-2" },
+        message: "sampled"
+      )
+
+      assert_equal :drop, sampler.call(draft)
+    end
+
+    def test_head_sampler_default_key_prefers_context_request_id_without_execution_id
+      sampler = Julewire::Sampling.head(rate: 0.5)
+      draft = hash_draft(
+        execution: {},
+        context: { request_id: "request-2" },
+        message: "different-message"
+      )
+
+      assert_nil sampler.call(draft)
+    end
+
+    def test_head_sampler_default_key_falls_back_to_source_event_and_message
+      sampler = Julewire::Sampling.head(rate: 0.5)
+
+      assert_nil sampler.call(hash_draft(execution: {}, context: {}, message: "sampled"))
+      assert_equal :drop, sampler.call(hash_draft(execution: {}, context: {}, message: "different-message"))
+    end
+
+    def test_head_sampler_default_key_tolerates_sparse_hash_like_drafts
+      sampler = Julewire::Sampling.head(rate: 1)
+
+      assert_nil sampler.call({})
+    end
+
+    def test_head_sampler_default_fallback_includes_each_record_identity_field
+      assert_fallback_field_affects_decision(
+        hash_draft(execution: {}, context: {}, source: "source-a"),
+        hash_draft(execution: {}, context: {}, source: "source-b")
+      )
+      assert_fallback_field_affects_decision(
+        hash_draft(execution: {}, context: {}, event: "event-a"),
+        hash_draft(execution: {}, context: {}, event: "event-b")
+      )
+      assert_fallback_field_affects_decision(
+        hash_draft(execution: {}, context: {}, message: "message-a"),
+        hash_draft(execution: {}, context: {}, message: "message-b")
+      )
     end
 
     def test_head_sampler_drops_nil_custom_keys
@@ -56,16 +140,16 @@ module Julewire
     end
 
     def test_keep_handles_edge_rates_and_nil_keys
-      refute Julewire::Sampling.keep?(rate: 0, key: "request-1")
-      assert Julewire::Sampling.keep?(rate: 1, key: "request-1")
-      refute Julewire::Sampling.keep?(rate: 1, key: nil)
-      refute Julewire::Sampling.keep?(rate: 0.5, key: nil)
+      assert_false Julewire::Sampling.keep?(rate: 0, key: "request-1")
+      assert_true Julewire::Sampling.keep?(rate: 1, key: "request-1")
+      assert_false Julewire::Sampling.keep?(rate: 1, key: nil)
+      assert_false Julewire::Sampling.keep?(rate: 0.5, key: nil)
     end
 
     def test_keep_uses_stable_hash_threshold
-      refute Julewire::Sampling.keep?(rate: 0.5, key: "request-1")
-      assert Julewire::Sampling.keep?(rate: 0.5, key: "request-2")
-      refute Julewire::Sampling.keep?(rate: 0.5, key: "alpha")
+      assert_false Julewire::Sampling.keep?(rate: 0.5, key: "request-1")
+      assert_true Julewire::Sampling.keep?(rate: 0.5, key: "request-2")
+      assert_false Julewire::Sampling.keep?(rate: 0.5, key: "alpha")
     end
 
     def test_threshold_for_edge_and_midpoint_rates
@@ -133,9 +217,51 @@ module Julewire
       Julewire::RecordDraft.build(
         { execution: execution, message: "sampled" },
         context: { request_id: request_id },
-        scope: nil,
-        freeze_sections: false
+        scope: nil
       )
+    end
+
+    def hash_draft(execution:, context:, source: :test, event: "sample.event", message: "sampled")
+      {
+        context: context,
+        event: event,
+        execution: execution,
+        message: message,
+        source: source
+      }
+    end
+
+    def assert_fallback_field_affects_decision(first, second)
+      first_key = fallback_key(first)
+      second_key = fallback_key(second)
+      rate = split_rate(first_key, second_key)
+      sampler = Julewire::Sampling.head(rate: rate)
+
+      assert_sample_decision sample_decision(first_key, rate), sampler.call(first)
+      assert_sample_decision sample_decision(second_key, rate), sampler.call(second)
+      refute_equal sampler.call(first), sampler.call(second)
+    end
+
+    def fallback_key(draft)
+      [draft[:source], draft[:event], draft[:message]].join("\0")
+    end
+
+    def split_rate(first_key, second_key)
+      first_hash = Julewire::Sampling.stable_hash(first_key)
+      second_hash = Julewire::Sampling.stable_hash(second_key)
+      lower, upper = [first_hash, second_hash].minmax
+
+      Rational(lower + ((upper - lower) / 2), 1 << 64)
+    end
+
+    def sample_decision(key, rate)
+      Julewire::Sampling.keep?(rate: rate, key: key) ? nil : :drop
+    end
+
+    def assert_sample_decision(expected, actual)
+      return assert_nil(actual) if expected.nil?
+
+      assert_equal expected, actual
     end
   end
 end

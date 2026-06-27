@@ -9,7 +9,6 @@ module Julewire
             reject_output_array!(output)
             return output if wrapped?(output)
 
-            validate_writeable!(output)
             SynchronizedOutput.new(output, close_output: close_output)
           end
 

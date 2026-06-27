@@ -43,7 +43,7 @@ module Julewire
         end
       end
 
-      def initialize(configuration = Configuration.new, profile:)
+      def initialize(configuration, profile:)
         @configuration = configuration
         @profile = profile
       end
@@ -64,13 +64,12 @@ module Julewire
             source: @configuration.source,
             error: EventPayload.error(event),
             neutral: messaging_attributes(name, payload),
-            attributes: event_attributes(name, payload)
+            attributes: event_attributes(payload)
           )
         end
-        nil
       end
 
-      def event_attributes(_name, payload)
+      def event_attributes(payload)
         Core.deep_compact_empty(@profile.event_prefix.to_sym => payload)
       end
 

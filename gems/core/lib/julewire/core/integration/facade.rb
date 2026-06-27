@@ -6,24 +6,16 @@ module Julewire
       # @api integration_spi
       module Facade
         class << self
-          def emit(record = Core::UNSET, enforce_level: true, **fields)
+          def emit(record = UNSET, enforce_level: true, **fields)
             record = Core.emit_input(record, fields)
-            runtime = RuntimeLocator.current
-            if runtime.respond_to?(:emit_integration)
-              runtime.emit_integration(record, enforce_level: enforce_level)
-            elsif enforce_level
-              runtime.emit(record)
-            else
-              runtime.emit_without_level(record)
-            end
+            RuntimeLocator.current.emit_integration(record, enforce_level: enforce_level)
             nil
           end
 
-          def with_execution(type:, **, &)
-            raise ArgumentError, "block required" unless block_given?
-
+          def with_execution(type:, **options, &)
             integration_write_section!(:execution)
-            RuntimeLocator.current.with_execution(type: type, owned: true, **, &)
+            validate_owned_fields!(options)
+            RuntimeLocator.current.with_execution(type: type, owned: true, **options, &)
           end
 
           def with_attributes(fields, &)
@@ -88,6 +80,7 @@ module Julewire
             raise ArgumentError, "block required" unless block_given?
 
             integration_write_section!(section)
+            validate_owned_fields!(fields)
             case section
             when :attributes then ContextStore.current.with_attributes(fields, owned: true, &)
             when :carry then ContextStore.current.with_carry(fields, owned: true, &)
@@ -104,7 +97,6 @@ module Julewire
             when :context then ContextStore.current.add_context(fields, owned: true)
             when :neutral then ContextStore.current.add_neutral(fields, owned: true)
             end
-            nil
           end
 
           def integration_write_section!(section)
@@ -115,10 +107,15 @@ module Julewire
             raise ArgumentError, "integration cannot write #{section}"
           end
 
+          def validate_owned_fields!(value)
+            Protocol.validate_symbol_hash(value)
+          end
+
           def add_summary_fields(fields, writer)
             integration_write_section!(:summary)
+            validate_owned_fields!(fields)
             scope = ContextStore.current.current_scope
-            return unless scope && fields.is_a?(Hash)
+            return unless scope
 
             fields = Serialization::DeepCompactEmpty.compact_owned!(fields)
             scope.public_send(writer, fields, owned: true) unless fields.empty?

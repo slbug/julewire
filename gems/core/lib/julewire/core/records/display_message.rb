@@ -118,9 +118,7 @@ module Julewire
 
           def duration_text(value)
             text = format("%.3f", value.round(3))
-            text.delete_suffix!("0") while text.end_with?("0")
-            text.delete_suffix!(".")
-            text
+            text.sub(/(?:\.0+|(\.\d+?)0+)\z/, "\\1")
           end
 
           def job_queue(neutral)
@@ -153,7 +151,7 @@ module Julewire
           end
 
           def value_at(value, key)
-            Fields::Lookup.value(value, key)
+            Fields::Lookup.wire_value(value, key)
           end
 
           def blank?(value)

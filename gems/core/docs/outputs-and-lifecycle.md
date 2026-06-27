@@ -40,7 +40,10 @@ strings.
 
 Processors may intentionally return `:drop`. Core counts those records in
 `health[:pipeline][:counts][:processor_dropped]`; processor failures are counted
-separately as `processor_error`.
+separately as `processor_error`. Unsupported non-`nil`/non-draft return values
+keep the current draft and increment `processor_invalid`. A processor that
+leaves an invalid draft also increments `processor_invalid`, but that record is
+dropped before the next processor and also increments `processor_dropped`.
 
 Async queues, files, fanout appenders, batching, retries, acknowledgements,
 reopen, rotation, shutdown hooks, and delivery policy belong in custom
@@ -149,11 +152,12 @@ out, `Julewire.close` returns `false`, but later emits still drop as
 `runtime_closed` until the next `configure` or `reset!`.
 
 `Julewire.after_fork!` resets process-local counters, failure snapshots,
-current context, warning state, and mutexes inherited from the parent process.
-It also forwards `after_fork!` to destinations and outputs that implement it,
-then runs integration after-fork hooks registered through core. File, socket,
-queue, and async transports should reopen worker-local resources from their
-destination or output `after_fork!` method.
+current context, warning state, schedulers, and registries that cannot be
+shared with the child process. It also forwards `after_fork!` to destinations
+and outputs that implement it, then runs integration after-fork hooks
+registered through core. File, socket, queue, and async transports should
+reopen worker-local resources from their destination or output `after_fork!`
+method.
 
 Core does not install an `at_exit` hook. Small scripts should call close from
 their own shutdown path:

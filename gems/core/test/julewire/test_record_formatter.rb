@@ -4,6 +4,7 @@ require "test_helper"
 
 module Julewire
   class TestRecordFormatter < Minitest::Test
+    cover Julewire::Core::Records::Formatter
     def test_default_formatter_omits_internal_and_empty_fields
       record = build_record(
         { message: "hello", logger: nil, payload: {}, labels: { service: "core" } },
@@ -16,11 +17,11 @@ module Julewire
 
       assert_equal "hello", formatted.fetch("message")
       assert_equal({ "service" => "core" }, formatted.fetch("labels"))
-      refute formatted.key?("carry")
-      refute formatted.key?("logger")
-      refute formatted.key?("context")
-      refute formatted.key?("payload")
-      refute formatted.key?("error")
+      assert_false formatted.key?("carry")
+      assert_false formatted.key?("logger")
+      assert_false formatted.key?("context")
+      assert_false formatted.key?("payload")
+      assert_false formatted.key?("error")
     end
 
     def test_default_formatter_compacts_execution_lineage
@@ -57,7 +58,7 @@ module Julewire
 
       formatted = formatted_record(record)
 
-      refute formatted.key?("execution")
+      assert_false formatted.key?("execution")
     end
 
     def test_default_formatter_preserves_empty_strings

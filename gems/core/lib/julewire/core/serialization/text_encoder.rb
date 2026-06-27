@@ -48,13 +48,13 @@ module Julewire
             positive: true
           )
           @color = color
-          @line_suffix = append_newline ? "\n" : ""
+          @append_newline = append_newline
           @theme = validate_theme(theme)
         end
 
         def call(payload)
           text = payload.is_a?(String) ? payload : line_for(payload)
-          "#{text}#{@line_suffix}"
+          @append_newline ? "#{text}\n" : text
         end
 
         private
@@ -82,7 +82,7 @@ module Julewire
           # Console output is human-facing; JSON keeps nanosecond precision.
           return value.iso8601(6) if value.respond_to?(:iso8601)
 
-          value.to_s
+          value
         end
 
         def severity(payload)
@@ -123,7 +123,7 @@ module Julewire
         def compact_hash(name, value)
           return unless value.is_a?(Hash) && !value.empty?
 
-          "#{name}=#{truncate(JSON.generate(value, allow_nan: false))}"
+          "#{name}=#{truncate(JSON.generate(value))}"
         rescue StandardError
           "#{name}=#{truncate(value.inspect)}"
         end
@@ -135,7 +135,7 @@ module Julewire
         end
 
         def value_at(payload, key)
-          Fields::Lookup.value(payload, key)
+          Fields::Lookup.wire_value(payload, key)
         end
 
         def blank?(value)

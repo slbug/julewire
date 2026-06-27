@@ -12,12 +12,20 @@ module Julewire
   end
 
   class TestHealthContracts < Minitest::Test
+    cover Julewire::Core::Diagnostics::Health
+    cover "Julewire::Core::Runtime#build_runtime_health"
+    cover "Julewire::Core::Runtime#degraded_health?"
+    cover "Julewire::Core::Runtime#health"
+    cover "Julewire::Core::Runtime#integrations_degraded?"
+    cover "Julewire::Core::Runtime#pipeline_degraded?"
+    cover "Julewire::Core::Runtime#runtime_degraded?"
+    cover "Julewire::Core::Runtime#runtime_status"
     def test_unconfigured_output_reports_degraded_runtime_status
       health = Julewire.health
 
       assert_equal :degraded, health.fetch(:status)
       assert_equal :unconfigured, health.dig(:pipeline, :status)
-      refute health.dig(:pipeline, :configured)
+      assert_false health.dig(:pipeline, :configured)
     end
 
     def test_unconfigured_health_matches_fixture
@@ -45,7 +53,7 @@ module Julewire
       health = Julewire.health
 
       assert_equal :closed, health.fetch(:status)
-      assert health.fetch(:closed)
+      assert_true health.fetch(:closed)
     end
 
     private

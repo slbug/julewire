@@ -28,7 +28,7 @@ module Julewire
             max_array_items: DEFAULT_MAX_ARRAY_ITEMS,
             max_hash_keys: DEFAULT_MAX_HASH_KEYS,
             compact_empty: false,
-            max_backtrace_lines: Core::MAX_BACKTRACE_LINES
+            max_backtrace_lines: MAX_BACKTRACE_LINES
           )
             new(
               max_depth: max_depth,
@@ -47,8 +47,7 @@ module Julewire
           max_array_items: DEFAULT_MAX_ARRAY_ITEMS,
           max_hash_keys: DEFAULT_MAX_HASH_KEYS,
           compact_empty: false,
-          max_backtrace_lines: Core::MAX_BACKTRACE_LINES,
-          copy_strings: true
+          max_backtrace_lines: MAX_BACKTRACE_LINES
         )
           super(
             max_array_items: max_array_items,
@@ -63,7 +62,6 @@ module Julewire
             name: :max_backtrace_lines
           )
           @compact_empty = compact_empty
-          @copy_strings = copy_strings
         end
 
         def serialize(value)
@@ -77,27 +75,25 @@ module Julewire
 
         private
 
-        def scalar_value(value, depth, _key, _path)
+        def scalar_value(value, depth)
           return serialize_exception(value, depth) if value.is_a?(Exception)
 
           case value
           when nil, true, false
-            clear_truncated(value)
+            value
           when Numeric
             serialize_numeric(value)
           when Symbol
-            clear_truncated(value.to_s)
+            value.to_s
           when String
             serialize_string(value)
-          when Time, DateTime, Date
+          when Time, Date
             serialize_temporal(value)
           else
             return serialize_iso8601_temporal(value) if zone_temporal?(value)
 
             serialize_object(value)
           end
-        rescue StandardError => e
-          clear_truncated(unserializable_marker(e))
         end
 
         def serialize_exception(error, depth)
@@ -116,30 +112,30 @@ module Julewire
         end
 
         def serialize_numeric(value)
-          return serialize_float(value) if value.is_a?(Float)
-          return clear_truncated(value) if value.is_a?(Integer)
-          return serialize_string(value.to_s("F")) if defined?(BigDecimal) && value.is_a?(BigDecimal)
+          return serialize_float(value) if value.instance_of?(Float)
+          return value if value.instance_of?(Integer)
+          return serialize_string(value.to_s("F")) if defined?(BigDecimal) && value.instance_of?(::BigDecimal)
 
-          serialize_string(EncodingSanitizer.call(value.to_s))
+          serialize_string(value.to_s)
         end
 
         def serialize_float(value)
-          return clear_truncated(value) if value.finite?
-          return clear_truncated(NAN_VALUE) if value.nan?
+          return value if value.finite?
+          return NAN_VALUE if value.nan?
 
-          clear_truncated(value.positive? ? INFINITY_VALUE : NEGATIVE_INFINITY_VALUE)
+          value.positive? ? INFINITY_VALUE : NEGATIVE_INFINITY_VALUE
         end
 
         def serialize_temporal(value)
-          return clear_truncated(value.getutc.iso8601(9)) if value.is_a?(Time)
-          return clear_truncated(value.iso8601(9)) if value.is_a?(DateTime)
+          return value.getutc.iso8601(9) if value.is_a?(Time)
+          return value.iso8601(9) if value.is_a?(DateTime)
 
-          clear_truncated(value.iso8601)
+          value.iso8601
         end
 
         def serialize_iso8601_temporal(value)
           temporal = value.respond_to?(:utc) ? value.utc : value
-          clear_truncated(EncodingSanitizer.call(temporal.iso8601(9)))
+          EncodingSanitizer.call(temporal.iso8601(9))
         end
 
         def zone_temporal?(value)
@@ -152,9 +148,9 @@ module Julewire
 
         def raw_omitted_value?(value) = DeepCompactEmpty.omitted?(value)
 
-        def key_value(key, _depth = nil, _path = nil) = serialize_key(key)
+        def key_value(key) = serialize_key(key)
 
-        def error_value(error) = clear_truncated(unserializable_marker(error))
+        def error_value(error) = unserializable_marker(error)
 
         def serialize_key(key)
           case key
@@ -170,31 +166,18 @@ module Julewire
         end
 
         def serialize_symbol_key(key)
-          name = key.name
-          return serialize_trusted_key_string(name) if safe_trusted_key_name?(name)
-
-          serialize_key_string(name)
-        end
-
-        def safe_trusted_key_name?(value)
-          value.ascii_only? || (value.encoding == Encoding::UTF_8 && value.valid_encoding?)
+          serialize_key_string(key.name)
         end
 
         def serialize_key_string(value)
           string = EncodingSanitizer.call(value)
-          return clear_truncated(copy_string(string)) if string.bytesize <= MAX_KEY_BYTES
+          return copy_string(string) if string.bytesize <= MAX_KEY_BYTES
 
           mark_truncated("#{string.byteslice(0, MAX_KEY_BYTES).scrub("?")}#{TRUNCATED_SUFFIX}")
         end
 
-        def serialize_trusted_key_string(value)
-          return clear_truncated(value) if value.bytesize <= MAX_KEY_BYTES
-
-          mark_truncated("#{value.byteslice(0, MAX_KEY_BYTES).scrub("?")}#{TRUNCATED_SUFFIX}")
-        end
-
         def serialize_object(value)
-          clear_truncated(object_marker(value))
+          object_marker(value)
         end
 
         def object_marker(value)
@@ -213,19 +196,9 @@ module Julewire
 
         def serialize_string(value)
           string = EncodingSanitizer.call(value)
-          return clear_truncated(copy_string(string)) if string.bytesize <= @max_string_bytes
+          return copy_string(string) if string.bytesize <= @max_string_bytes
 
           mark_truncated("#{string.byteslice(0, @max_string_bytes).scrub("?")}#{TRUNCATED_SUFFIX}")
-        end
-
-        def copy_string(value)
-          value.frozen? || !@copy_strings ? value : value.dup
-        end
-
-        def record_hash_truncation(fields, _raw_key, key, key_truncated, child_truncated)
-          return fields unless key_truncated || child_truncated
-
-          append_truncation_field(fields, key)
         end
       end
     end

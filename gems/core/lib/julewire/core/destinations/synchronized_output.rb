@@ -17,8 +17,6 @@ module Julewire
         end
 
         def after_fork!
-          @mutex = Mutex.new
-          @lifecycle_mutex = Mutex.new
           @output.after_fork! if @output.respond_to?(:after_fork!)
           @lifecycle = lifecycle_methods
           self
@@ -41,7 +39,7 @@ module Julewire
             lifecycle = @lifecycle[:flush]
             return true unless lifecycle
 
-            call_lifecycle(:flush, lifecycle, timeout: timeout) != false
+            lifecycle_succeeded?(call_lifecycle(:flush, lifecycle, timeout: timeout))
           end
         end
 
@@ -52,12 +50,13 @@ module Julewire
             @mutex.synchronize do
               return true if output_closed?
 
-              result = if @close_output && @lifecycle[:close]
-                         call_lifecycle(:close, @lifecycle.fetch(:close), timeout: timeout)
-                       elsif @lifecycle[:flush]
-                         call_lifecycle(:flush, @lifecycle.fetch(:flush), timeout: timeout)
-                       end
-              result != false
+              if @close_output && (close_lifecycle = @lifecycle[:close])
+                return lifecycle_succeeded?(call_lifecycle(:close, close_lifecycle, timeout: timeout))
+              end
+
+              return true unless (flush_lifecycle = @lifecycle[:flush])
+
+              lifecycle_succeeded?(call_lifecycle(:flush, flush_lifecycle, timeout: timeout))
             end
           end
         end
@@ -65,8 +64,10 @@ module Julewire
         private
 
         def output_closed?
-          @output.respond_to?(:closed?) ? @output.closed? : false
+          @output.respond_to?(:closed?) && @output.closed?
         end
+
+        def lifecycle_succeeded?(result) = !result.equal?(false)
 
         def call_lifecycle(name, lifecycle, timeout:)
           return @output.public_send(name, timeout: timeout) if lifecycle.fetch(:timeout)
@@ -78,9 +79,9 @@ module Julewire
           %i[flush close].each_with_object({}) do |name, methods|
             next unless @output.respond_to?(name)
 
-            method = @output.method(name)
-            methods[name] = { timeout: accepts_timeout_keyword?(method) }.freeze
-          end.freeze
+            method = @output.public_method(name)
+            methods[name] = { timeout: accepts_timeout_keyword?(method) }
+          end
         end
 
         def accepts_timeout_keyword?(method)

@@ -4,12 +4,7 @@ require "test_helper"
 
 module Julewire
   class TestRack < Minitest::Test
-    cover Julewire::Rack
-
-    def test_exposes_version
-      assert_equal "1.0.1", Julewire::Rack::VERSION
-    end
-
+    cover Julewire::Rack::Error
     def test_error_inherits_julewire_error
       assert_operator Julewire::Rack::Error, :<, Julewire::Error
     end

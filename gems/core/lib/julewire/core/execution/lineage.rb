@@ -24,7 +24,6 @@ module Julewire
           end
 
           def from_execution_hash(execution)
-            execution = {} unless execution.is_a?(Hash)
             new(
               reference: execution_reference(execution),
               root_reference: relationship_value(execution, :root),
@@ -68,7 +67,9 @@ module Julewire
             id = reference_value(execution, :id)
             reference[:type] = type unless type.equal?(MISSING)
             reference[:id] = id unless id.equal?(MISSING)
-            reference.empty? ? nil : reference
+            return if reference.empty?
+
+            reference
           end
         end
 
@@ -81,15 +82,18 @@ module Julewire
           ancestors: nil,
           ancestors_truncated: false
         )
-          @parent_lineage = parent_lineage
           @depth = depth_value(depth, parent_lineage)
-          @root_reference = freeze_reference(root_reference || root_reference_for(reference, parent_lineage))
+          @root_reference = freeze_reference(
+            root_reference || parent_lineage&.root_reference_for_child || reference
+          )
           @parent_reference = freeze_reference(parent_reference)
           @ancestor_references = freeze_ancestors(ancestors)
           @ancestors_truncated = ancestors_truncated ? true : false
-          @ancestor_references_for_child = nil
-          @truncated = nil
-          @truncated_computed = false
+          return if @ancestor_references
+
+          references = inherited_ancestor_references(parent_lineage)
+          @ancestor_references = references.last(MAX_ANCESTORS).freeze
+          @ancestors_truncated ||= references.length > MAX_ANCESTORS
         end
 
         def merge_into_frozen(execution)
@@ -100,34 +104,14 @@ module Julewire
           hash.freeze
         end
 
-        def ancestors
-          references = @ancestor_references_for_child
-          return references if references
+        def ancestors = @ancestor_references
 
-          materialize_ancestor_references_for_child
-        end
-
-        def truncated?
-          return @truncated if @truncated_computed
-
-          @truncated = @ancestors_truncated || ancestor_count_exceeds_limit?
-          @truncated_computed = true
-          @truncated
-        end
-
-        def freeze
-          return self if frozen?
-
-          ancestors
-          truncated?
-          @parent_lineage = nil
-          super
-        end
+        def truncated? = @ancestors_truncated
 
         protected
 
         def ancestor_references_for_child
-          ancestors
+          @ancestor_references
         end
 
         def root_reference_for_child
@@ -136,37 +120,14 @@ module Julewire
 
         private
 
-        attr_reader :parent_lineage
-
-        def materialize_ancestor_references_for_child
-          if @ancestor_references
-            @ancestor_references_for_child = @ancestor_references.freeze
-          else
-            references = build_ancestor_references
-            @truncated = references.length > MAX_ANCESTORS
-            @truncated_computed = true
-            @ancestor_references_for_child = references.last(MAX_ANCESTORS).freeze
-          end
-        end
-
-        def ancestor_count_exceeds_limit?
-          return false if @ancestor_references_for_child
-
-          build_ancestor_references.length > MAX_ANCESTORS
-        end
-
         def depth_value(depth, parent_lineage)
-          return depth if depth.is_a?(Integer) && depth.positive?
+          return depth if depth.instance_of?(Integer) && depth.positive?
           return parent_lineage.depth + 1 if parent_lineage
 
           1
         end
 
-        def root_reference_for(reference, parent_lineage)
-          parent_lineage ? parent_lineage.root_reference_for_child : reference
-        end
-
-        def build_ancestor_references
+        def inherited_ancestor_references(parent_lineage)
           return [] unless parent_lineage && @parent_reference
 
           parent_lineage.ancestor_references_for_child + [@parent_reference]
@@ -180,7 +141,6 @@ module Julewire
 
         def freeze_reference(reference)
           return unless reference
-          return reference if reference.frozen?
 
           Serialization::ValueCopy.call(reference, freeze_values: true)
         end

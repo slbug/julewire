@@ -11,12 +11,10 @@ module Julewire
               return target if normalized_path.empty?
 
               deep_delete_path!(target, normalized_path)
-              target
             end
 
             def apply_delete_paths!(target, paths)
               paths.each { delete_path!(target, it) }
-              target
             end
 
             def clear_delete_paths!(paths, fields)
@@ -27,7 +25,7 @@ module Julewire
             end
 
             def normalize_path(path)
-              Array(path).flatten.filter_map { Internal.normalize_key(it) }
+              Array(path).flatten.map { Internal.normalize_key(it) }
             end
 
             private
@@ -37,7 +35,7 @@ module Julewire
 
               fields.flat_map do |key, value|
                 path = prefix + [Internal.normalize_key(key)]
-                nested = value.is_a?(Hash) ? field_paths(value, path) : []
+                nested = field_paths(value, path)
                 nested.empty? ? [path] : nested
               end
             end
@@ -53,12 +51,11 @@ module Julewire
               key = path.first
               if path.one?
                 Internal.delete_key!(target, key)
-                return
+              else
+                child = FieldSet.value_for(target, key)
+                deep_delete_path!(child, path.drop(1))
+                Internal.delete_key!(target, key) if child.is_a?(Hash) && child.empty?
               end
-
-              child = FieldSet.value_for(target, key)
-              deep_delete_path!(child, path.drop(1))
-              Internal.delete_key!(target, key) if child.is_a?(Hash) && child.empty?
             end
           end
         end

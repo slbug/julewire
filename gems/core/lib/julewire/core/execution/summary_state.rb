@@ -16,31 +16,29 @@ module Julewire
           @attributes = {}
           @metrics = {}
           @errors = []
-          @error_severity = nil
-          @record_input = nil
         end
 
         def payload_hash
-          Fields::FieldSet.deep_dup(@payload)
+          Fields::FieldSet.deep_dup_owned(@payload)
         end
 
         def metrics_hash
-          Fields::FieldSet.deep_dup(@metrics)
+          Fields::FieldSet.deep_dup_owned(@metrics)
         end
 
-        def add(fields, owned: false)
+        def add(fields, owned:)
           merge_fields!(@payload, fields, owned: owned)
         end
 
-        def add_attributes(fields, owned: false)
+        def add_attributes(fields, owned:)
           deep_merge_fields!(@attributes, fields, owned: owned)
         end
 
-        def add_neutral(fields, owned: false)
+        def add_neutral(fields, owned:)
           deep_merge_fields!(@neutral, fields, owned: owned)
         end
 
-        def increment_attribute(path, by: 1)
+        def increment_attribute(path, by:)
           path = Fields::Internal.normalize_path(path)
           raise ArgumentError, "attribute path is required" if path.empty?
 
@@ -48,7 +46,7 @@ module Julewire
           key = path.last
           value = Fields::FieldSet.value_for(container, key, default: MISSING)
           existing = !value.equal?(MISSING)
-          container[Fields::Internal.normalize_key(key)] = incremented_value(value, by, existing: existing)
+          container[key] = incremented_value(value, by, existing: existing)
         end
 
         def increment(key, by: 1)
@@ -66,7 +64,7 @@ module Julewire
           values << Fields::FieldSet.deep_dup(value)
         end
 
-        def record_error(error, severity: nil)
+        def record_error(error, severity:)
           @errors << error
           @error_severity = Records::Severity.normalize(severity) unless severity.nil?
         end
@@ -90,7 +88,7 @@ module Julewire
         end
 
         def record_input(**fields)
-          Fields::FieldSet.deep_dup(owned_record_input(**fields))
+          Fields::FieldSet.deep_dup_owned(owned_record_input(**fields))
         end
 
         def owned_record_input(**fields)
@@ -143,13 +141,13 @@ module Julewire
         def attributes_hash(base_attributes)
           return base_attributes if @attributes.empty?
 
-          Fields::Internal.deep_merge(base_attributes, @attributes)
+          Fields::Internal.deep_merge_owned!(Fields::FieldSet.deep_dup_owned(base_attributes), @attributes)
         end
 
         def neutral_hash(base_neutral)
           return base_neutral if @neutral.empty?
 
-          Fields::Internal.deep_merge(base_neutral, @neutral)
+          Fields::Internal.deep_merge_owned!(Fields::FieldSet.deep_dup_owned(base_neutral), @neutral)
         end
 
         def array_value(value, existing:)
@@ -173,23 +171,22 @@ module Julewire
         end
 
         def measurement_base(key)
-          unless key.is_a?(String) || key.is_a?(Symbol)
+          unless key.is_a?(String) || key.instance_of?(Symbol)
             raise ArgumentError, "measurement key must be a String or Symbol"
           end
 
-          base = key.to_s
+          base = key
           raise ArgumentError, "measurement key is required" if base.empty?
 
           base
         end
 
         def attribute_container(path)
-          path[0...-1].reduce(@attributes) do |container, key|
-            normalized = Fields::Internal.normalize_key(key)
-            child = container[normalized]
+          path[...-1].reduce(@attributes) do |container, key|
+            child = container[key]
             unless child.is_a?(Hash)
               child = {}
-              container[normalized] = child
+              container[key] = child
             end
             child
           end

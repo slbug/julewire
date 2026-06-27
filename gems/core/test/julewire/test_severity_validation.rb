@@ -6,32 +6,25 @@ require "stringio"
 
 module Julewire
   class TestSeverityValidation < Minitest::Test
+    cover Julewire::Core::Diagnostics::InvalidSeverityReporter
     cover Julewire::Core::Records::Severity
-
     def test_severity_rank_accepts_normalized_symbols_strings_and_logger_integers
       severity = Julewire::Core::Records::Severity
 
       assert_equal 0, severity.rank(:debug)
       assert_equal 3, severity.rank(3)
       assert_equal :info, severity.normalize(:info)
-      assert_equal :info, severity.normalize(:INFO)
     end
 
-    def test_severity_normalizes_supported_symbols_without_allocation_path
+    def test_severity_requires_canonical_symbols_and_normalizes_case_insensitive_strings
       severity = Julewire::Core::Records::Severity
 
-      Julewire::Core::Records::Severity::VALUES.each do |value|
-        assert_equal value, severity.normalize(value)
-      end
-    end
-
-    def test_severity_normalizes_case_insensitive_symbols_and_strings
-      severity = Julewire::Core::Records::Severity
-
-      assert_equal :warn, severity.normalize(:WARN)
-      assert_equal :error, severity.normalize(:Error)
+      assert_equal :warn, severity.normalize(:warn)
       assert_equal :fatal, severity.normalize("FATAL")
       assert_equal :unknown, severity.normalize("unknown")
+
+      assert_unsupported_severity(:WARN, ":WARN")
+      assert_unsupported_severity(:Error, ":Error")
     end
 
     def test_severity_normalizes_logger_integer_values
@@ -59,24 +52,12 @@ module Julewire
       assert_match(/\Aunsupported severity: #<Object:/, error.message)
     end
 
-    def test_severity_symbol_returns_unvalidated_symbol_or_nil
-      severity = Julewire::Core::Records::Severity
-
-      assert_equal :info, severity.severity_symbol(:INFO)
-      assert_equal :warning, severity.severity_symbol(:WARNING)
-      assert_equal :debug, severity.severity_symbol("debug")
-      assert_equal :fatal, severity.severity_symbol(4)
-      assert_nil severity.severity_symbol("warning")
-      assert_nil severity.severity_symbol(6)
-      assert_nil severity.severity_symbol(false)
-    end
-
     def test_severity_rank_accepts_every_normalized_input_shape
       severity = Julewire::Core::Records::Severity
 
       assert_equal 0, severity.rank(:debug)
       assert_equal 1, severity.rank("info")
-      assert_equal 2, severity.rank(:WARN)
+      assert_equal 2, severity.rank(:warn)
       assert_equal 3, severity.rank(3)
       assert_equal 4, severity.rank("FATAL")
       assert_equal 5, severity.rank(:unknown)

@@ -15,3 +15,7 @@ Generic job metadata such as class, id, queue, priority, execution count,
 timestamps, and status is emitted in the record's `neutral` section as `job.*`
 formatter-coordination fields. Full Active Job metadata, including framework-
 specific status and exception fields, is emitted under `attributes.active_job`.
+
+Status classification follows Active Job's normal `StandardError` path. Fatal
+Ruby exceptions such as `SystemExit` or `NoMemoryError` are not converted into
+job status metadata; they keep Ruby's process-level semantics.

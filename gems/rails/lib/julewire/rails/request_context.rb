@@ -3,7 +3,12 @@
 module Julewire
   module Rails
     class RequestContext
-      def initialize(configuration:, request:, active_support_context: Core::UNSET, event_reporter: Core::UNSET)
+      def initialize(
+        configuration:,
+        request:,
+        active_support_context: Julewire::Core::UNSET,
+        event_reporter: Julewire::Core::UNSET
+      )
         @configuration = configuration
         @request = request
         @active_support_context = default_provider(active_support_context) { ::ActiveSupport::ExecutionContext }
@@ -23,14 +28,14 @@ module Julewire
       private
 
       def default_provider(value)
-        value.equal?(Core::UNSET) ? yield : value
+        value.equal?(Julewire::Core::UNSET) ? yield : value
       end
 
       def with_request_context(&)
         return yield unless @configuration.request_context?
 
         fields = RequestAttributes.context_fields(@request)
-        Core::Integration::Facade.with_context(fields) do
+        Julewire::Core::Integration::Facade.with_context(fields) do
           with_active_support_execution_context(fields) do
             with_rails_event_context(fields, &)
           end
@@ -41,10 +46,14 @@ module Julewire
         return yield unless @configuration.carry_request_headers
         raise ArgumentError, "carry_request_headers must be an explicit header list" if all_carry_headers?
 
-        headers = Julewire::Rack::Capture::Headers.request(@request, selector: @configuration.carry_request_headers)
+        headers = Julewire::Rack::Capture::Headers.request(
+          @request,
+          selector: @configuration.carry_request_headers
+        )
         return yield if headers.empty?
 
-        Core::Integration::Facade.with_carry(http: { request_headers: headers }, &)
+        headers = RequestAttributes.normalize_user_fields(headers)
+        Julewire::Core::Integration::Facade.with_carry(http: { request_headers: headers }, &)
       end
 
       def all_carry_headers?
@@ -67,7 +76,7 @@ module Julewire
           @event_reporter.set_context(fields)
           context_set = true
         rescue StandardError
-          return yield
+          nil
         end
         yield
       ensure
@@ -81,8 +90,21 @@ module Julewire
       end
 
       def restore_rails_event_context(previous)
+        return unless clear_rails_event_context
+        return if previous.nil? || previous.empty?
+
+        apply_rails_event_context(previous)
+      end
+
+      def clear_rails_event_context
         @event_reporter.clear_context
-        @event_reporter.set_context(previous) unless previous.nil? || previous.empty?
+        true
+      rescue StandardError
+        false
+      end
+
+      def apply_rails_event_context(previous)
+        @event_reporter.set_context(previous)
       rescue StandardError
         nil
       end

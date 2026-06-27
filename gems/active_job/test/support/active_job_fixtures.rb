@@ -61,12 +61,6 @@ module Julewire
       end
     end
 
-    class FakeSummary
-      def add(_fields)
-        raise "summary failed"
-      end
-    end
-
     class FakeBase
       class << self
         attr_reader :callbacks
@@ -78,7 +72,7 @@ module Julewire
         def <(other) = inherited_modules.include?(other)
 
         def prepend(mod)
-          inherited_modules << mod
+          inherited_modules << mod unless inherited_modules.include?(mod)
         end
 
         def around_perform(&block)

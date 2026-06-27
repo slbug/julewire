@@ -1,21 +1,37 @@
 # frozen_string_literal: true
 
-require "julewire/core/testing"
+require "fileutils"
+require "tmpdir"
 
 module Julewire
   module Core
     module TestHelpers
-      include Julewire::Core::Testing::Contracts
-
       CLIResult = Data.define(:status, :stdout, :stderr)
+      CLI_THREAD_TIMEOUT = 0.2
 
       def reset_julewire!
-        Julewire::Core::RuntimeRegistry.clear!
         Julewire.reset!
       end
 
       def capture_julewire_records
-        Julewire::Core::Testing.capture { yield it if block_given? }
+        Julewire::Testing.capture { yield it if block_given? }
+      end
+
+      def assert_runtime_call_rejected_inside_configure(method_name, &)
+        error = assert_raises(Julewire::Core::Error) do
+          Julewire.configure(&)
+        end
+
+        assert_equal "Julewire.#{method_name} cannot be called from inside Julewire.configure", error.message
+      end
+
+      def in_temporary_repo(&)
+        Dir.mktmpdir("julewire-test") { |dir| Dir.chdir(dir, &) }
+      end
+
+      def write_temporary_repo_file(path, content)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, content)
       end
 
       def configure_record_capture(level: nil, processors: [])
@@ -23,7 +39,11 @@ module Julewire
 
         Julewire.configure do |config|
           config.level = level if level
-          configure_destination(config, formatter: RecordCaptureFormatter.new(records), output: NullOutput.new)
+          configure_destination(
+            config,
+            formatter: RecordCaptureFormatter.new(records),
+            output: Julewire::Testing::NullOutput.new
+          )
           Array(processors).each { config.processors.use(it) }
         end
 
@@ -54,27 +74,25 @@ module Julewire
         end
       end
 
-      def configure_default_output_with_callback(output, callback_name, callback)
-        Julewire.configure do |config|
-          configure_destination(config, output: output)
-          config.public_send(:"#{callback_name}=", callback)
-        end
-      end
-
-      def build_contract_record(fields = {})
-        build_julewire_contract_record(fields)
-      end
-
-      def build_contract_draft(fields = {})
-        build_julewire_contract_draft(fields)
-      end
-
       def build_execution_scope(**)
         Core::Execution::Scope.new(**)
       end
 
       def normalized_record(**overrides)
         Core::Records::Record::REQUIRED_KEYS.to_h { [it, normalized_record_default(it)] }.merge(overrides)
+      end
+
+      def fixture_truncation_metadata
+        {
+          truncated: true,
+          truncated_fields: ["ids"],
+          limits: {
+            max_array_items: nil,
+            max_depth: 20,
+            max_hash_keys: nil,
+            max_string_bytes: 10
+          }
+        }
       end
 
       def normalized_record_default(key)
@@ -88,16 +106,21 @@ module Julewire
         end
       end
 
-      def run_cli(argv, input: "")
+      def run_cli(argv, input: "", timeout: CLI_THREAD_TIMEOUT)
         stdout = StringIO.new
         stderr = StringIO.new
-        status = Julewire::Core::CLI.call(
-          argv: argv,
-          stdin: StringIO.new(input),
-          stdout: stdout,
-          stderr: stderr
-        )
-        CLIResult.new(status: status, stdout: stdout.string, stderr: stderr.string)
+        thread = safe_thread do
+          status = Julewire::Core::CLI.call(
+            argv: argv,
+            stdin: StringIO.new(input),
+            stdout: stdout,
+            stderr: stderr
+          )
+          CLIResult.new(status: status, stdout: stdout.string, stderr: stderr.string)
+        end
+        safe_thread_value(thread, timeout: timeout)
+      ensure
+        cleanup_thread(thread, timeout: 0)
       end
 
       def tail_line(message:, event:)
@@ -128,6 +151,46 @@ module Julewire
         )
       end
 
+      def without_constant(owner, name)
+        existed = owner.const_defined?(name, false)
+        original = owner.const_get(name, false) if existed
+        owner.__send__(:remove_const, name) if existed
+        yield
+      ensure
+        restore_constant(owner, name, existed, original)
+      end
+
+      def with_temporary_constant(owner, name, value)
+        existed = owner.const_defined?(name, false)
+        original = owner.const_get(name, false) if existed
+        owner.__send__(:remove_const, name) if existed
+        owner.const_set(name, value)
+        yield
+      ensure
+        restore_constant(owner, name, existed, original)
+      end
+
+      def restore_constant(owner, name, existed, original)
+        owner.__send__(:remove_const, name) if owner.const_defined?(name, false)
+        owner.const_set(name, original) if existed
+      end
+
+      def with_log_formats
+        original = Core::CLI::LogFormats.instance_variable_get(:@entries)
+        yield
+      ensure
+        Core::CLI::LogFormats.instance_variable_set(:@entries, original)
+      end
+
+      def configure_runtime_failure_capture(runtime, output: StringIO.new)
+        failures = Queue.new
+        runtime.configure do |config|
+          configure_destination(config, output: output)
+          config.on_failure = ->(error, metadata) { failures << [error, metadata] }
+        end
+        failures
+      end
+
       def configure_destination(config, output:, **options)
         name = options.fetch(:name, :default)
         config.destinations.clear if name == :default
@@ -153,12 +216,6 @@ module Julewire
         def call(record)
           @records << Fields::FieldSet.deep_dup(record)
           {}
-        end
-      end
-
-      class NullOutput
-        def write(value)
-          value.bytesize
         end
       end
 

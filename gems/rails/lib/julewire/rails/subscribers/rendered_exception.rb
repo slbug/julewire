@@ -7,12 +7,10 @@ module Julewire
     module Subscribers
       class RenderedException
         class << self
-          include Core::Integration::SubscriberInstall
+          include Julewire::Core::Integration::SubscriberInstall
 
           def install!(configuration)
             return reset! unless configuration.request_summary? || configuration.rendered_exceptions?
-            return unless defined?(::ActionDispatch::DebugExceptions)
-            return unless ::ActionDispatch::DebugExceptions.respond_to?(:register_interceptor)
 
             install_subscriber(configuration, enabled: true) do |subscriber|
               ::ActionDispatch::DebugExceptions.register_interceptor(subscriber)
@@ -23,8 +21,6 @@ module Julewire
           private
 
           def unregister_interceptor(subscriber)
-            return unless ::ActionDispatch::DebugExceptions.respond_to?(:interceptors)
-
             ::ActionDispatch::DebugExceptions.interceptors.delete(subscriber)
           end
         end
@@ -43,12 +39,12 @@ module Julewire
 
           capture_request_error(request, exception, wrapper)
           unless @configuration.rendered_exceptions?
-            IntegrationHealth.record_success(action: :call, component: :rendered_exception_subscriber)
+            IntegrationHealth.record_success
             return
           end
 
-          Core::Integration::Facade.emit(
-            severity: severity_for(request, wrapper),
+          Julewire::Core::Integration::Facade.emit(
+            severity: severity_for(request),
             event: "action_dispatch.rendered_exception",
             logger: "ActionDispatch::DebugExceptions",
             source: @configuration.source,
@@ -56,7 +52,7 @@ module Julewire
             neutral: neutral_for(request, wrapper),
             error: exception
           )
-          IntegrationHealth.record_success(action: :call, component: :rendered_exception_subscriber)
+          IntegrationHealth.record_success
         rescue StandardError => e
           IntegrationHealth.record_failure(
             e,
@@ -85,7 +81,7 @@ module Julewire
             RequestMiddleware::RENDERED_EXCEPTION_ENV_KEY,
             {
               error: exception,
-              severity: severity_for(request, wrapper),
+              severity: severity_for(request),
               status: status_code(wrapper),
               rescue_response: rescue_response?(wrapper),
               rescue_template: rescue_template(wrapper)
@@ -94,7 +90,7 @@ module Julewire
           RequestErrorOwnership.mark(exception)
         end
 
-        def severity_for(request, _wrapper)
+        def severity_for(request)
           ExceptionSeverity.for_request(request)
         end
 
@@ -106,15 +102,15 @@ module Julewire
               path: request.path,
               status: status_code(wrapper),
               rescue_template: rescue_template(wrapper)
-            }.compact
+            }
           }
         end
 
         def neutral_for(request, wrapper)
-          Core::Fields::AttributeKeys.fields(
-            Core::Fields::AttributeKeys::HTTP_REQUEST_METHOD => request.request_method,
-            Core::Fields::AttributeKeys::URL_PATH => request.path,
-            Core::Fields::AttributeKeys::HTTP_RESPONSE_STATUS_CODE => status_code(wrapper)
+          Julewire::Core::Fields::AttributeKeys.fields(
+            Julewire::Core::Fields::AttributeKeys::HTTP_REQUEST_METHOD => request.request_method,
+            Julewire::Core::Fields::AttributeKeys::URL_PATH => request.path,
+            Julewire::Core::Fields::AttributeKeys::HTTP_RESPONSE_STATUS_CODE => status_code(wrapper)
           )
         end
 

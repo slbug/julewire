@@ -3,6 +3,12 @@
 `Julewire.health` is an in-process operational snapshot. It is useful for
 metrics, smoke checks, and debug pages. It is not a delivery receipt.
 
+Counters and diagnostic references are updated atomically. A health read is
+not a transaction across those independent values: during a concurrent update,
+one snapshot may combine adjacent observations (for example, a new count with
+the preceding failure reference). Counters remain exact, and later reads
+converge on the latest diagnostic state.
+
 ## Stable Fields
 
 These fields are intended for integration dashboards and contract tests:
@@ -59,9 +65,13 @@ reset on reconfigure. Top-level `generation` increments when configuration
 installs a new pipeline.
 `pipeline.counts[:processor_dropped]` counts intentional processor drops such
 as sampling decisions; processor failures are counted separately under
-`pipeline.counts[:processor_error]`.
+`pipeline.counts[:processor_error]`. Unsupported processor return values keep
+the current draft and increment `pipeline.counts[:processor_invalid]`.
+Malformed processor-owned draft data also increments `processor_invalid`; core
+stops the chain and counts the resulting loss under `processor_dropped`.
 Destination-local processors report the same `processor_dropped` and
-`processor_error` counters under that destination's `counts`.
+`processor_error`/`processor_invalid` counters under that destination's
+`counts`.
 
 `status` fields describe current health for the active runtime generation.
 Runtime, pipeline, and destination failure counters plus `last_failure` /

@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 1.1.0 - 2026-07-20
+
+- Restore propagated context through owned carrier envelopes and keep job
+  status summaries on Active Job's normal `StandardError` path.
+- Require Julewire 1.1.0 internal gems.
+
 ## 1.0.1 - 2026-06-25
 
 - Default propagation carrier byte limits to 64 KiB and record health when

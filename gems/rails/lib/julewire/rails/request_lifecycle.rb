@@ -3,23 +3,16 @@
 module Julewire
   module Rails
     class RequestLifecycle
-      attr_reader :execution_handle
-
       def initialize(configuration:, env:, request:, taggers:)
         @configuration = configuration
         @env = env
         @request = request
         @taggers = taggers
-        @completion_attached = false
-        @execution_handle = nil
-        @instrumenter_handle = nil
-        @tag_count = 0
       end
 
       def start
         @tag_count = push_tags
         @instrumenter_handle = start_request_instrumentation
-        self
       end
 
       def start_execution!(neutral:)
@@ -60,7 +53,7 @@ module Julewire
       private
 
       def push_tags
-        return 0 unless ::Rails.logger.respond_to?(:push_tags)
+        return unless ::Rails.logger.respond_to?(:push_tags)
 
         ::Rails.logger.push_tags(*compute_tags).size
       end
@@ -88,12 +81,13 @@ module Julewire
       end
 
       def finish_request_thread_logging
-        return unless @tag_count.to_i.positive? && ::Rails.logger.respond_to?(:pop_tags)
+        return unless @tag_count&.positive?
 
-        ::Rails.logger.pop_tags(@tag_count)
-        @tag_count = 0
-      rescue StandardError
-        nil
+        begin
+          ::Rails.logger.pop_tags(@tag_count)
+        rescue StandardError
+          nil
+        end
       end
 
       def finish_unattached_request

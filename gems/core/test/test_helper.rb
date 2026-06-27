@@ -2,8 +2,8 @@
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
-require "julewire/core/testing/coverage"
-Julewire::Core::Testing::Coverage.start!
+require_relative "../../../support/testing/coverage"
+Julewire::TestSupport::Coverage.start!
 
 require "julewire/core"
 require "julewire/core/testing"
@@ -11,26 +11,72 @@ require_relative "support/julewire/core/test_helpers"
 require_relative "support/julewire/core/test_payload_processor"
 
 require "minitest/autorun"
-require "julewire/core/testing/test_reports"
-Julewire::Core::Testing::TestReports.start!
-require "mutant/minitest/coverage"
+require "minitest/strict"
+require_relative "../../../support/testing/method_override"
+require_relative "../../../support/testing/test_reports"
+Julewire::TestSupport::TestReports.start!
+require_relative "../../../support/mutant/minitest_coverage"
+require "timeout"
 
 module Minitest
   class Test
     include Julewire::Core::TestHelpers
-
-    TEST_THREAD_TIMEOUT = 1
+    include Julewire::TestSupport::MethodOverride
 
     def setup
       reset_julewire!
     end
 
-    def assert_registry_rejects_object(registry, message)
-      error = assert_raises(ArgumentError) do
-        registry.use Object.new
+    def safe_thread(*, &block)
+      build_safe_thread(block) { |worker| Thread.new(*, &worker) }
+    end
+
+    def safe_julewire_thread(*, &block)
+      build_safe_thread(block) { |worker| Julewire.thread(*, &worker) }
+    end
+
+    def build_safe_thread(block)
+      raise ArgumentError, "block required" unless block
+
+      worker = proc do |*thread_arguments|
+        Thread.current.abort_on_exception = false
+        Thread.current.report_on_exception = false
+        block.call(*thread_arguments)
+      rescue Exception => e # rubocop:disable Lint/RescueException -- Re-raised by the owning test after bounded join.
+        Thread.current.thread_variable_set(:julewire_test_worker_exception, e)
+        nil
+      end
+      yield worker
+    end
+
+    def safe_thread_value(thread, timeout: 1)
+      unless thread.join(Float(timeout))
+        cleanup_thread(thread)
+
+        flunk "thread did not finish within #{timeout} seconds"
       end
 
-      assert_match message, error.message
+      value = thread.value
+      error = thread.thread_variable_get(:julewire_test_worker_exception)
+      raise error if error
+
+      value
+    end
+
+    def safe_thread_values(threads, timeout: 1)
+      threads.map { safe_thread_value(it, timeout: timeout) }
+    end
+
+    def safe_queue_pop(queue, timeout: 1)
+      Timeout.timeout(timeout) { queue.pop }
+    end
+
+    def cleanup_thread(thread, timeout: 0)
+      return unless thread
+      return if thread.join(Float(timeout))
+
+      thread.kill
+      thread.join(0.1)
     end
 
     def assert_raises_message(error_class, message, &)
@@ -50,7 +96,7 @@ module Minitest
     def assert_truncation_metadata_keys(metadata, fields:, key_style:, **limits)
       key_for = ->(value) { key_style == :string ? value.to_s : value }
 
-      assert metadata.fetch(key_for.call(:truncated))
+      assert_true metadata.fetch(key_for.call(:truncated))
       assert_equal fields, metadata.fetch(key_for.call(:truncated_fields))
       limit_values = metadata.fetch(key_for.call(:limits))
 
@@ -76,18 +122,26 @@ module Minitest
       Julewire.with_execution(type: :job, emit_summary: false, &)
     end
 
-    def nonblocking_queue_values(queue) = Julewire::Core::Testing.nonblocking_queue_values(queue)
+    def nonblocking_queue_values(queue) = Array.new(queue.size) { queue.pop(true) }
 
     def destination_health(name = :default)
       Julewire.health.fetch(:pipeline).fetch(:destinations).fetch(name)
     end
 
+    def queue_callbacks(drops:, failures:)
+      {
+        on_drop: ->(reason, metadata) { drops << [reason, metadata] },
+        on_failure: ->(error, metadata) { failures << [error, metadata] }
+      }
+    end
+
     def build_destination(output:, encoder: Julewire::Core::Serialization::JsonEncoder.new,
                           formatter: Julewire::Core::Records::Formatter.new, name: :default,
-                          on_drop: nil, on_failure: nil, max_record_bytes: Julewire::Core::DEFAULT_MAX_RECORD_BYTES)
+                          on_drop: nil, on_failure: nil, max_record_bytes: Julewire::Core::DEFAULT_MAX_RECORD_BYTES,
+                          close_output: false)
       Julewire::Core::Destinations::Destination.new(
         name: name,
-        close_output: false,
+        close_output: close_output,
         encoder: encoder,
         formatter: formatter,
         max_record_bytes: max_record_bytes,
@@ -129,30 +183,19 @@ module Minitest
       ).to_record
     end
 
-    def cleanup_thread(thread, timeout: TEST_THREAD_TIMEOUT)
-      return unless thread
-      return if thread_joined?(thread, timeout: timeout)
-
-      thread.kill
-      thread.join
-    end
-
-    def thread_joined?(thread, timeout: TEST_THREAD_TIMEOUT)
-      return true if thread.join(0)
-      return true if thread.join(timeout)
-
-      false
-    end
-
-    def with_overridden_singleton_method(receiver, method_name, replacement, &)
-      Julewire::Core::Testing.with_overridden_singleton_method(receiver, method_name, replacement, &)
-    end
-
     def assert_invalid_utf8_repaired
       repaired = yield invalid_utf8_string
 
       assert_equal "token ?", repaired
       assert_predicate repaired, :valid_encoding?
+    end
+
+    def deep_value_contains?(value, expected)
+      return true if value == expected
+      return value.any? { deep_value_contains?(it, expected) } if value.is_a?(Array)
+      return value.any? { |_, item| deep_value_contains?(item, expected) } if value.is_a?(Hash)
+
+      false
     end
 
     def invalid_utf8_string

@@ -4,6 +4,7 @@ require "test_helper"
 
 module Julewire
   class TestEventSubscriberSummaryFields < Minitest::Test
+    cover Julewire::Rails::Subscribers::Event
     def test_request_completion_summary_keeps_missing_duration_absent
       output = configure_output
       subscriber = Julewire::Rails::Subscribers::Event.new
@@ -20,8 +21,8 @@ module Julewire
       attributes = parse_records(output).fetch(0).fetch("attributes").fetch("rails")
 
       assert_equal 204, attributes.fetch("status")
-      refute attributes.key?("duration_ms")
-      refute attributes.key?("action_runtime_ms")
+      assert_false attributes.key?("duration_ms")
+      assert_false attributes.key?("action_runtime_ms")
     end
   end
 end

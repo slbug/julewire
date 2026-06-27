@@ -21,16 +21,16 @@ module Julewire
       end
 
       def emit(record)
+        degradation_marker = @health.degradation_marker
         formatted = false
         increment(:received)
         payload = @formatter.call(record)
         formatted = true
         @transport.write(encoded_payload(payload), severity: record.fetch(:severity))
-        record_written
+        record_written(degradation_marker)
         nil
       rescue StandardError => e
         record_failure(e, formatted: formatted, record: record)
-        nil
       end
 
       def flush(*) = call_lifecycle(:flush) { @transport.flush }
@@ -46,7 +46,7 @@ module Julewire
       def health
         transport = @transport.health
         @health.snapshot(
-          status: status(@health.degraded?, transport),
+          status: status(transport),
           type: "semantic_logger_destination",
           transport: transport
         )
@@ -71,14 +71,14 @@ module Julewire
         @health.increment(name)
       end
 
-      def record_written
-        @health.increment(:formatted)
-        @health.increment(:written)
-        @health.clear_degraded!
+      def record_written(degradation_marker)
+        increment(:formatted)
+        increment(:written)
+        @health.clear_degradation_if_unchanged(degradation_marker)
       end
 
-      def record_failure(error, formatted: false, record: nil)
-        @health.increment(:formatted) if formatted
+      def record_failure(error, formatted:, record:)
+        increment(:formatted) if formatted
         @health.record_failure(error, destination: name, phase: :destination, record_metadata: record_metadata(record))
         notify_failure(error, phase: :destination, record_metadata: record_metadata(record))
         record_drop(:destination_exception, record)
@@ -90,8 +90,9 @@ module Julewire
       end
 
       def call_lifecycle(action)
+        degradation_marker = @health.degradation_marker
         yield
-        clear_degraded
+        @health.clear_degradation_if_unchanged(degradation_marker)
         true
       rescue StandardError => e
         record_lifecycle_failure(e, action: action)
@@ -126,20 +127,18 @@ module Julewire
       end
 
       def record_metadata(record)
-        Core::Records::Metadata.call(record) if record
+        Core::Records::Metadata.call(record)
       end
 
-      def status(currently_degraded, transport)
-        transport_status = transport[:status]
-        return :closed if transport_status == :closed
-        return :degraded if currently_degraded
-        return :degraded if transport_status && transport_status != :ok
-
-        :ok
-      end
-
-      def clear_degraded
-        @health.clear_degraded!
+      def status(transport)
+        case transport[:status]
+        when :closed
+          :closed
+        when nil, :ok
+          nil
+        else
+          :degraded
+        end
       end
     end
   end

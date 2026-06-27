@@ -4,9 +4,7 @@ module Julewire
   module Karafka
     module Installer
       class << self
-        def install!(app: nil, monitor: nil, configuration: Configuration.new)
-          return false unless configuration.enabled?
-
+        def install!(app:, configuration:, monitor: nil)
           monitor ||= monitor_for(app)
           raise Error, "Karafka monitor is not available" unless monitor
 
@@ -20,10 +18,7 @@ module Julewire
         private
 
         def monitor_for(app)
-          app ||= defined?(::Karafka::App) ? ::Karafka::App : nil
-          app.config.monitor if app.respond_to?(:config)
-        rescue StandardError
-          nil
+          Core::Integration::Values::Read.nested_value(app, :config, :monitor)
         end
       end
     end

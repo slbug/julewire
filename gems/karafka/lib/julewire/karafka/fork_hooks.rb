@@ -11,18 +11,17 @@ module Julewire
       private_constant :EVENTS, :INSTALL_STATE
 
       class << self
-        def subscribe!(monitor, configuration: Configuration.new)
+        def subscribe!(monitor, configuration:)
           return unless configuration.enabled?
           return unless monitor.respond_to?(:subscribe)
 
-          state = INSTALL_STATE.fetch_or_store(monitor) { { events: [].freeze }.freeze }
-          subscribed_events = Array(state[:events]).dup
+          state = INSTALL_STATE.fetch_or_store(monitor) { { events: [] } }
+          subscribed_events = state.fetch(:events)
           EVENTS.each do |event_name|
             next if subscribed_events.include?(event_name)
 
             subscribed_events << event_name if subscribe_event(monitor, event_name)
           end
-          INSTALL_STATE.store(monitor, { events: subscribed_events.freeze }.freeze)
           monitor
         end
 
@@ -35,10 +34,7 @@ module Julewire
         private
 
         def subscribe_event(monitor, event_name)
-          IntegrationHealth.with_failure_health(action: :subscribe, component: :fork_hooks, event: event_name) do
-            monitor.subscribe(event_name) { handle(event_name, it) }
-            true
-          end || false
+          MonitorSubscription.subscribe(monitor, event_name, component: :fork_hooks) { handle(event_name, it) }
         end
       end
     end

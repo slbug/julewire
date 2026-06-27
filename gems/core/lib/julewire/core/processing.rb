@@ -10,7 +10,6 @@ module Julewire
           raise ArgumentError, "processor factory block required" unless factory
 
           @factories[normalize_kind(kind)] = factory
-          nil
         end
 
         def build(kind, ...)
@@ -31,7 +30,8 @@ module Julewire
           raise ArgumentError, "processor kind must respond to #to_sym" unless kind.respond_to?(:to_sym)
 
           name = kind.to_sym
-          raise ArgumentError, "processor kind cannot be empty" if name.name.empty?
+          raise ArgumentError, "processor kind #to_sym must return a Symbol" unless name.instance_of?(Symbol)
+          raise ArgumentError, "processor kind cannot be empty" if name.empty?
 
           name
         end

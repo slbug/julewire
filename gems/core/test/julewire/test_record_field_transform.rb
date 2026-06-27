@@ -5,7 +5,7 @@ require "test_helper"
 module Julewire
   class TestRecordFieldTransform < Minitest::Test
     cover Julewire::Core::Processing::RecordFieldTransform
-
+    cover "Julewire::Core::Processing::ProcessorChain*"
     def test_transforms_canonical_record_containers_including_error
       transform = Core::Processing::RecordFieldTransform.new(track_paths: true, preserve_top_level_keys: %i[source])
       record = {
@@ -139,9 +139,9 @@ module Julewire
       assert_equal "abc...[Truncated]", result.fetch(:message)
       assert_equal "abc...[Truncated]", result.dig(:payload, :long)
       assert_nil result.dig(:payload, :other)
-      assert result.dig(:payload, :_julewire_truncation, :truncated)
+      assert_true result.dig(:payload, :_julewire_truncation, :truncated)
       assert_equal "abc...[Truncated]", result.dig(:attributes, :list, 0)
-      assert result.dig(:attributes, :list, 1, :_julewire_truncation, :truncated)
+      assert_true result.dig(:attributes, :list, 1, :_julewire_truncation, :truncated)
     end
 
     def test_applies_depth_bound
@@ -153,7 +153,7 @@ module Julewire
       result = transform.call(record) { Core::Serialization::BoundedTransform::CONTINUE }
 
       assert_equal "[MaxDepth]", result.dig(:context, :request, :id)
-      assert result.dig(:context, :_julewire_truncation, :truncated)
+      assert_true result.dig(:context, :_julewire_truncation, :truncated)
     end
 
     def test_accepts_hash_subclasses_for_container_fields
@@ -176,20 +176,12 @@ module Julewire
       end
     end
 
-    def test_exposes_canonical_container_and_scalar_key_sets
-      assert_includes Core::Processing::RecordFieldTransform.container_keys, :error
-      assert_includes Core::Processing::RecordFieldTransform.container_keys, :payload
-      assert_includes Core::Processing::RecordFieldTransform.scalar_keys, :source
-      assert Core::Processing::RecordFieldTransform.container_key?(:error)
-      assert Core::Processing::RecordFieldTransform.scalar_key?(:message)
-    end
-
-    def test_field_placement_tracks_record_shape
-      expected_containers = (Core::Records::Record::HASH_SECTIONS + %i[error]).sort
-      expected_scalars = (Core::Records::Record::REQUIRED_KEYS - expected_containers).sort
-
-      assert_equal expected_containers, Core::Processing::RecordFieldTransform.container_keys.sort
-      assert_equal expected_scalars, Core::Processing::RecordFieldTransform.scalar_keys.sort
+    def test_recognizes_canonical_container_and_scalar_keys
+      assert_true Core::Processing::RecordFieldTransform.container_key?(:error)
+      assert_true Core::Processing::RecordFieldTransform.container_key?(:payload)
+      assert_true Core::Processing::RecordFieldTransform.scalar_key?(:message)
+      assert_false Core::Processing::RecordFieldTransform.container_key?(:source)
+      assert_false Core::Processing::RecordFieldTransform.scalar_key?(:payload)
     end
 
     private

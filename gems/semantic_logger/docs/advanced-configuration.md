@@ -36,6 +36,18 @@ These options are passed to `SemanticLogger::Appender::Async` when
 | `lag_check_interval:` | `1_000` |
 | `lag_threshold_s:` | `30` |
 
+## Async Queue Options
+
+Transport-level async options are passed to the Semantic Logger async proxy
+when the installed Semantic Logger version supports them. Semantic Logger 4.18
+supports queue size and lag options. Semantic Logger 5 also supports
+`non_blocking:`, `dropped_message_report_seconds:`, and `async_max_retries:`.
+Setting a non-default unsupported async option raises a configuration error.
+
+`batch: true` uses `SemanticLogger::Appender::AsyncBatch` on Semantic Logger 4
+and `SemanticLogger::Appender::Async` batch mode on Semantic Logger 5. Batch
+mode implies async output.
+
 ## Appender Defaults
 
 Unknown transport options are merged into each appender spec. This is useful for

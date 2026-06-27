@@ -11,7 +11,7 @@ module Julewire
           return unless settings.logger?
 
           mode = normalized_mode(settings.require_output)
-          return if mode == false || health.dig(:pipeline, :configured)
+          return if health.dig(:pipeline, :configured)
 
           case mode
           when :warn
@@ -25,7 +25,7 @@ module Julewire
 
         def normalized_mode(value)
           case value
-          when false, nil then false
+          when false, nil then nil
           when true, :warn, "warn" then :warn
           when :raise, "raise" then :raise
           else

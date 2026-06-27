@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 1.1.0 - 2026-07-20
+
+- Support Semantic Logger 4 and 5 async option shapes.
+- Keep destination health and callback failure reporting aligned with core.
+- Require julewire-core 1.1.0.
+
 ## 1.0.1 - 2026-06-25
 
 - Report destination callback failures in health, matching core destinations.

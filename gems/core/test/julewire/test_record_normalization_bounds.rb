@@ -4,8 +4,13 @@ require "test_helper"
 
 module Julewire
   class TestRecordNormalizationBounds < Minitest::Test
+    cover Julewire::Core::Records::Draft
+    cover "Julewire::Core::Records::Draft::Builder*"
+    cover Julewire::Core::Records::Record
     cover Julewire::Core::Serialization::ValueCopy
-
+    cover "Julewire::Core::Serialization::ValueCopy#copy_container"
+    cover "Julewire::Core::Serialization::ValueCopyTruncation#finish_array"
+    cover "Julewire::Core::Serialization::ValueCopyTruncation#truncation_metadata"
     PATHOLOGICAL_DEPTH = 5_000
 
     def test_record_draft_build_bounds_deep_payload_normalization
@@ -15,7 +20,7 @@ module Julewire
         scope: nil
       )
 
-      assert deep_value_contains?(draft.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
+      assert_true deep_value_contains?(draft.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
     end
 
     def test_record_draft_build_bounds_payload_array_items
@@ -49,7 +54,7 @@ module Julewire
       assert_symbol_truncation_metadata copied.fetch(:_julewire_truncation),
                                         fields: ["hash_keys"],
                                         max_hash_keys: 1_000
-      refute copied.key?(key_symbol(1_000))
+      assert_false copied.key?(key_symbol(1_000))
     end
 
     def test_record_draft_build_bounds_payload_string_bytes
@@ -68,9 +73,14 @@ module Julewire
       assert_symbol_truncation_metadata metadata,
                                         fields: ["message"],
                                         max_string_bytes: limit
-      assert_predicate metadata, :frozen?
-      assert_predicate metadata.fetch(:truncated_fields), :frozen?
-      assert_predicate metadata.fetch(:limits), :frozen?
+      refute_predicate metadata, :frozen?
+
+      record = draft.to_record
+      finalized_metadata = record.dig(:payload, :_julewire_truncation)
+
+      assert_predicate finalized_metadata, :frozen?
+      assert_predicate finalized_metadata.fetch(:truncated_fields), :frozen?
+      assert_predicate finalized_metadata.fetch(:limits), :frozen?
     end
 
     def test_value_copy_hash_key_limit_counts_input_entries_before_symbolized_key_collisions
@@ -82,7 +92,17 @@ module Julewire
       assert_symbol_truncation_metadata copied.fetch(:_julewire_truncation),
                                         fields: ["hash_keys"],
                                         max_hash_keys: 2
-      refute copied.key?(:other)
+      assert_false copied.key?(:other)
+    end
+
+    def test_value_copy_symbolized_keys_reject_object_keys_before_copying_values
+      value = value_that_fails_when_copied
+
+      error = assert_raises(TypeError) do
+        Julewire::Core::Serialization::ValueCopy.call({ Object.new => value }, symbolize_keys: true)
+      end
+
+      assert_equal "field keys must be String or Symbol", error.message
     end
 
     def test_value_copy_array_limit_counts_visited_items_before_copied_empty_omission
@@ -182,12 +202,12 @@ module Julewire
     end
 
     def test_record_finalization_bounds_deep_owned_mutation
-      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record, freeze_sections: false)
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record)
       draft[:payload] = { nested: deep_hash(Julewire::Core::NORMALIZATION_MAX_DEPTH + 8) }
 
       record = draft.to_record
 
-      assert deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
+      assert_true deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
     end
 
     def test_record_from_normalized_hash_bounds_pathological_depth_before_validation_overflows
@@ -207,7 +227,7 @@ module Julewire
     end
 
     def test_record_finalization_bounds_pathological_depth_after_owned_mutation
-      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record, freeze_sections: false)
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record)
       draft[:payload] = { nested: deep_hash(PATHOLOGICAL_DEPTH) }
 
       assert_deep_payload_bounded draft.to_record
@@ -219,20 +239,22 @@ module Julewire
       depth.times.reduce("leaf") { |value, index| { "level_#{index}": value } }
     end
 
+    def value_that_fails_when_copied
+      Object.new.tap do |value|
+        def value.is_a?(klass)
+          raise "value should not be traversed before key validation" if [Hash, Array, String, Time].include?(klass)
+
+          super
+        end
+      end
+    end
+
     def key_symbol(index)
       :"key_#{index}"
     end
 
     def assert_deep_payload_bounded(record)
-      assert deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
-    end
-
-    def deep_value_contains?(value, expected)
-      return true if value == expected
-      return value.any? { deep_value_contains?(it, expected) } if value.is_a?(Array)
-      return value.any? { |_, item| deep_value_contains?(item, expected) } if value.is_a?(Hash)
-
-      false
+      assert_true deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
     end
   end
 end

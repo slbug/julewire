@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_fixnum"
+require "concurrent/atomic/atomic_reference"
+
 module Julewire
   module Ractor
     class ChildStats
@@ -13,8 +16,8 @@ module Julewire
       private_constant :COUNTER_KEYS
 
       def initialize
-        @mutex = Mutex.new
-        @counters = COUNTER_KEYS.to_h { [it, 0] }
+        @counters = COUNTER_KEYS.to_h { [it, Concurrent::AtomicFixnum.new] }
+        @last_error_class = Concurrent::AtomicReference.new
       end
 
       def message_sent = increment(:messages_sent)
@@ -32,34 +35,27 @@ module Julewire
       def request_timed_out = increment(:requests_timed_out)
 
       def reset!
-        @mutex.synchronize do
-          @counters.each_key { @counters[it] = 0 }
-          @last_error_class = nil
-        end
-        nil
+        @counters.each_value { it.value = 0 }
+        @last_error_class.set(nil)
       end
 
       def to_h
-        @mutex.synchronize do
-          {
-            counts: @counters.dup.freeze,
-            last_error_class: @last_error_class
-          }.compact.freeze
-        end
+        {
+          counts: @counters.transform_values(&:value).freeze,
+          last_error_class: @last_error_class.get
+        }.compact.freeze
       end
 
       private
 
       def increment(key)
-        @mutex.synchronize { @counters[key] += 1 }
+        @counters.fetch(key).increment
         nil
       end
 
       def record_error(key, error)
-        @mutex.synchronize do
-          @counters[key] += 1
-          @last_error_class = error.class.name
-        end
+        @counters.fetch(key).increment
+        @last_error_class.set(error.class.name)
         nil
       end
     end

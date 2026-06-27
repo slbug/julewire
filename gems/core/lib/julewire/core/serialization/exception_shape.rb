@@ -9,7 +9,7 @@ module Julewire
         DEFAULT_MAX_CAUSE_DEPTH = 5
 
         class << self
-          def call(error, max_backtrace_lines: Core::MAX_BACKTRACE_LINES, max_cause_depth: DEFAULT_MAX_CAUSE_DEPTH)
+          def call(error, max_backtrace_lines: MAX_BACKTRACE_LINES, max_cause_depth: DEFAULT_MAX_CAUSE_DEPTH)
             new(
               max_backtrace_lines: max_backtrace_lines,
               max_cause_depth: max_cause_depth
@@ -32,7 +32,7 @@ module Julewire
         def shape_exception(error, depth)
           return error unless error.is_a?(Exception)
 
-          with_traversal_container(error, Core::CIRCULAR_REFERENCE) do
+          with_traversal_container(error, CIRCULAR_REFERENCE) do
             exception_hash(error, depth)
           end
         end
@@ -50,7 +50,7 @@ module Julewire
             cause = exception_cause(error)
             next unless cause
 
-            if depth >= @max_cause_depth
+            if depth == @max_cause_depth
               result[:cause_truncated] = true
             else
               result[:cause] = shape_exception(cause, depth + 1)
@@ -59,20 +59,21 @@ module Julewire
         end
 
         def class_name(error)
-          error.class.name || error.class.to_s
+          error.class.to_s
         rescue StandardError
           "Exception"
         end
 
         def error_message(error)
           message = error.message
-          message.is_a?(String) ? message.dup : message.to_s
+          message.instance_of?(String) ? message.dup : message.to_s
         rescue StandardError
           "[Unavailable]"
         end
 
         def backtrace(error)
-          @backtrace_limiter.call(backtrace: Core::Fields::FieldSet.deep_dup(error.backtrace))[:backtrace]
+          limited = @backtrace_limiter.call(backtrace: Fields::FieldSet.deep_dup(error.backtrace))
+          limited.fetch(:backtrace)
         rescue StandardError
           nil
         end

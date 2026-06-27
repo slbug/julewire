@@ -9,7 +9,7 @@ module Julewire
           return to_h unless keys
 
           keys.each_with_object({}) do |key, selected|
-            selected[key] = Fields::FieldSet.deep_dup(@data[key]) if @data.key?(key)
+            selected[key] = Fields::FieldSet.deep_dup(fetch(key)) if key?(key)
           end
         end
       end
