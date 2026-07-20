@@ -118,7 +118,7 @@ module Julewire
       end
 
       def after_fork!
-        unless close_ports(timeout: @request_timeout)
+        if (@process_id - Process.pid).zero? && !close_ports(timeout: @request_timeout)
           raise Core::Error, "ractor destination worker did not stop within #{@request_timeout} seconds"
         end
 
@@ -159,6 +159,7 @@ module Julewire
       end
 
       def initialize_tracking
+        @process_id = Process.pid
         @scheduler = ReplyTimeoutScheduler.new(timeout_value: false)
         @closed = Concurrent::AtomicReference.new
         @health = Core::Integration::DestinationHealth.new(counter_keys: COUNTER_KEYS, failure_counter: nil)
@@ -178,6 +179,7 @@ module Julewire
         end
         @ack_thread = start_ack_thread
       rescue TypeError, ::Ractor::Error => e
+        @port = @worker = @ack_port = @ack_thread = nil
         raise ArgumentError, "ractor destination collaborators must be ractor-copyable or shareable: #{e}"
       end
 

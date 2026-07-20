@@ -636,6 +636,7 @@ module Julewire
     cover "Julewire::Ractor::Destination#close_ports"
     cover "Julewire::Ractor::Destination#initialize_tracking"
     cover "Julewire::Ractor::Destination#spawn_worker"
+    cover "Julewire::Ractor::Destination#start_worker"
     cover "Julewire::Ractor::Destination#wait_for_worker"
     include RactorRecordHelper
     include RactorWaitHelper
@@ -703,6 +704,8 @@ module Julewire
         output: ForkPipeBlockingFlushOutput.new(writer, release_io: release_reader),
         request_timeout: 0.01
       )
+      parent_port = destination.instance_variable_get(:@port)
+      destination.instance_variable_set(:@port, Object.new)
       child_pid = Process.fork do
         reader.close
         release_writer.close
@@ -720,6 +723,7 @@ module Julewire
         end
         exit! exit_status
       end
+      destination.instance_variable_set(:@port, parent_port)
       writer.close
       release_reader.close
       status_writer.close
@@ -764,6 +768,7 @@ module Julewire
           nil
         end
       end
+      destination.instance_variable_set(:@port, parent_port) if destination && parent_port
       cleanup_ractor_destination(destination)
       reader&.close
       writer&.close unless writer&.closed?
@@ -879,6 +884,7 @@ module Julewire
     cover "Julewire::Ractor::Destination#close_ports"
     cover "Julewire::Ractor::Destination#initialize_tracking"
     cover "Julewire::Ractor::Destination#spawn_worker"
+    cover "Julewire::Ractor::Destination#start_worker"
     cover "Julewire::Ractor::Destination#wait_for_worker"
     include RactorRecordHelper
     include RactorWaitHelper
@@ -946,7 +952,7 @@ module Julewire
       Julewire::Ractor::PortLifecycle.close(port) if port
     end
 
-    def test_ractor_destination_after_fork_records_restart_failures
+    def test_ractor_destination_discards_inherited_handles_when_restart_fails
       port = ::Ractor::Port.new
       failures = Queue.new
       output = TestRactorDestination::MutableCopyabilityOutput.new(port)
@@ -958,6 +964,8 @@ module Julewire
       old_command_port = destination.instance_variable_get(:@port)
       old_worker = destination.instance_variable_get(:@worker)
       output.make_non_copyable!
+      destination.instance_variable_set(:@process_id, Process.pid - 1)
+      destination.instance_variable_set(:@port, Object.new)
 
       restarted = safe_thread_value(safe_thread { destination.after_fork! }, timeout: 0.25)
 
@@ -969,6 +977,10 @@ module Julewire
       assert_match "ractor destination collaborators must be ractor-copyable or shareable", failure.message
       assert_equal :after_fork, metadata.fetch(:phase)
       refute_includes destination.health.fetch(:counts), :failures
+      assert_nil destination.instance_variable_get(:@port)
+      assert_nil destination.instance_variable_get(:@worker)
+      assert_nil destination.instance_variable_get(:@ack_port)
+      assert_nil destination.instance_variable_get(:@ack_thread)
     ensure
       cleanup_ractor_worker(old_command_port, old_worker) if defined?(old_worker)
       cleanup_ractor_destination(destination)

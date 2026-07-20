@@ -411,9 +411,13 @@ def mutant_runtime_subjects(dir)
 end
 
 def production_flay_output(dir)
-  output, status = Bundler.with_unbundled_env do
-    Open3.capture2e(RbConfig.ruby, Gem.bin_path("flay", "flay"), "lib", chdir: dir)
-  end
+  output, status = Open3.capture2e(
+    RbConfig.ruby,
+    "-rbundler/setup",
+    Gem.bin_path("flay", "flay"),
+    "lib",
+    chdir: dir
+  )
   raise "Flay failed for #{dir}:\n#{output}" unless status.success?
 
   output
@@ -421,7 +425,9 @@ end
 
 def production_flay_score(dir)
   output = production_flay_output(dir)
-  score = output.each_line.filter_map { |line| Julewire::Quality::Flay::SCORE_PATTERN.match(line)&.captures&.first }.last
+  score = output.each_line.filter_map do |line|
+    Julewire::Quality::Flay::SCORE_PATTERN.match(line)&.captures&.first
+  end.last
   return Integer(score, 10) if score
 
   raise "could not read Flay score for #{dir}:\n#{output}"

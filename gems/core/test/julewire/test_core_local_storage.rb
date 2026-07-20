@@ -71,12 +71,13 @@ module Julewire
         Julewire.const_set(:Ractor, fake_ractor)
 
         assert_false local_storage.__send__(:ractor_local_storage?)
-        result = ::Ractor.new do
+        worker = ::Ractor.new do
           runtime = Julewire::Core::Runtime.new
           Julewire::Core::LocalStorage.runtime = runtime
           [Julewire::Core::LocalStorage.runtime.equal?(runtime),
            Julewire::Core::LocalStorage.__send__(:ractor_runtime).equal?(runtime)]
-        end.value
+        end
+        _worker, result = ::Ractor.select(worker)
 
         assert_equal [true, true], result
       end
@@ -85,11 +86,12 @@ module Julewire
     def test_local_storage_ractor_runtime_builds_and_memoizes_runtime
       skip "Ractor-local storage is not available" unless ractor_storage_available?
 
-      result = Ractor.new do
+      worker = Ractor.new do
         first = Julewire::Core::LocalStorage.__send__(:ractor_runtime)
         second = Julewire::Core::LocalStorage.__send__(:ractor_runtime)
         [first.class.name, first.equal?(second)]
-      end.value
+      end
+      _worker, result = ::Ractor.select(worker)
 
       assert_equal ["Julewire::Core::Runtime", true], result
     end
@@ -97,13 +99,14 @@ module Julewire
     def test_local_storage_ractor_context_store_is_memoized_per_thread
       skip "Ractor-local storage is not available" unless ractor_storage_available?
 
-      result = Ractor.new do
+      worker = Ractor.new do
         store = Julewire::Core::LocalStorage.context_store
         other_thread_store = Thread.new { Julewire::Core::LocalStorage.context_store }.value
         [store.class.name,
          store.equal?(Julewire::Core::LocalStorage.context_store),
          store.equal?(other_thread_store)]
-      end.value
+      end
+      _worker, result = ::Ractor.select(worker)
 
       assert_equal ["Julewire::Core::ContextStore", true, false], result
     end

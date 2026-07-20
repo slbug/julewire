@@ -6,6 +6,8 @@
   shutdown so lifecycle operations cannot wait forever.
 - Harden queue accounting, fanout validation, worker stats, and Ractor-safe
   reply-timeout cleanup.
+- Discard inherited Ractor handles before rebuilding destination workers in a
+  forked child process.
 - Normalize application emit input before strict bridge serialization while
   keeping integration-owned emits on a non-normalizing Symbol-key path.
 - Require julewire-core 1.1.0.

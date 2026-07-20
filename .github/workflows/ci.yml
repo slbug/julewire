@@ -7,6 +7,14 @@ on:
 
   pull_request:
 
+  workflow_dispatch:
+    inputs:
+      run_mutant_changes:
+        description: Run Mutant Changes after every other CI job succeeds
+        required: false
+        default: false
+        type: boolean
+
 permissions:
   contents: read
   id-token: write
@@ -714,23 +722,47 @@ jobs:
           fail_ci_if_error: true
 
   mutant:
-    needs: changes
+    needs:
+      - changes
+      - release-check
+      - mutant-targets
+      - mutant-runtime-targets
+      - repository-policy
+      - core
+      - active_job
+      - gcp
+      - karafka
+      - rails
+      - rack
+      - rails-appraisal
+      - rails_support
+      - redaction
+      - semantic_logger
+      - semantic-logger-appraisal
+      - ractor
     if: >-
       ${{
-        needs.changes.outputs.shared == 'true' ||
-        needs.changes.outputs.core == 'true' ||
-        needs.changes.outputs.active_job == 'true' ||
-        needs.changes.outputs.gcp == 'true' ||
-        needs.changes.outputs.karafka == 'true' ||
-        needs.changes.outputs.rack == 'true' ||
-        needs.changes.outputs.ractor == 'true' ||
-        needs.changes.outputs.rails == 'true' ||
-        needs.changes.outputs.rails_support == 'true' ||
-        needs.changes.outputs.redaction == 'true' ||
-        needs.changes.outputs.semantic_logger == 'true'
+        always() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.run_mutant_changes == true &&
+        !contains(needs.*.result, 'failure') &&
+        !contains(needs.*.result, 'cancelled') &&
+        (
+          needs.changes.outputs.shared == 'true' ||
+          needs.changes.outputs.core == 'true' ||
+          needs.changes.outputs.active_job == 'true' ||
+          needs.changes.outputs.gcp == 'true' ||
+          needs.changes.outputs.karafka == 'true' ||
+          needs.changes.outputs.rack == 'true' ||
+          needs.changes.outputs.ractor == 'true' ||
+          needs.changes.outputs.rails == 'true' ||
+          needs.changes.outputs.rails_support == 'true' ||
+          needs.changes.outputs.redaction == 'true' ||
+          needs.changes.outputs.semantic_logger == 'true'
+        )
       }}
     runs-on: ubuntu-latest
-    name: mutant / Ruby 4.0
+    name: mutant changes (manual) / Ruby 4.0
     steps:
       - uses: actions/checkout@v7
         with:
@@ -743,10 +775,14 @@ jobs:
 
       - name: Run configured mutation subjects
         env:
-          SINCE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SINCE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
 
+          if [[ -z "$SINCE_SHA" ]]; then
+            SINCE_SHA="$(git merge-base HEAD "origin/$DEFAULT_BRANCH")"
+          fi
           if [[ "$SINCE_SHA" =~ ^0+$ ]] || ! git cat-file -e "${SINCE_SHA}^{commit}" 2>/dev/null; then
             SINCE_SHA="$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)"
           fi
