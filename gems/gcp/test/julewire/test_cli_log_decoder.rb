@@ -5,6 +5,18 @@ require "test_helper"
 module Julewire
   module GCP
     class TestCLILogDecoder < Minitest::Test
+      cover "Julewire::GCP::Formatter#append_log_field"
+      cover "Julewire::GCP::Formatter#append_payload_fields"
+      cover "Julewire::GCP::Formatter#append_special_fields"
+      cover "Julewire::GCP::Formatter#application_payload"
+      cover "Julewire::GCP::Formatter#call"
+      cover "Julewire::GCP::Formatter#initialize"
+      cover "Julewire::GCP::Formatter#julewire_payload"
+      cover "Julewire::GCP::Formatter#operation"
+      cover "Julewire::GCP::Formatter#operation_options"
+      cover "Julewire::GCP::Formatter#trace"
+      cover "Julewire::GCP::Formatter#true_value?"
+      cover Julewire::GCP::LogDecoder
       Result = Data.define(:status, :stdout, :stderr)
 
       def test_tail_renders_gcp_shaped_julewire_json_lines_with_explicit_format
@@ -38,7 +50,7 @@ module Julewire
         assert_equal "rails", payload.fetch("source")
         assert_equal({ "process_pid" => "123" }, payload.fetch("labels"))
         assert_equal({ "worker_pid" => 456 }, payload.fetch("payload"))
-        refute payload.key?("logging.googleapis.com/labels")
+        assert_false payload.key?("logging.googleapis.com/labels")
       end
 
       def test_transcode_encodes_core_logs_as_gcp_json
@@ -68,7 +80,117 @@ module Julewire
         assert_equal({ class: "RuntimeError", message: "123" }, decoded.fetch(:error))
       end
 
+      def test_gcp_log_decoder_maps_provider_base_fields
+        payload = JSON.parse(gcp_line)
+        payload["timestamp"] = "fallback"
+        payload.fetch("julewire")["logger"] = "AppLogger"
+
+        decoded = Core::CLI::LogFormats.decode(payload, format: :gcp)
+
+        assert_equal(
+          {
+            timestamp: "2026-06-19T10:00:00Z",
+            severity: :error,
+            kind: :summary,
+            event: "request.completed",
+            message: "RuntimeError: 123",
+            logger: "AppLogger",
+            source: "rails"
+          },
+          record_base(decoded)
+        )
+      end
+
+      def test_gcp_log_decoder_falls_back_to_timestamp_and_defaults
+        payload = JSON.parse(gcp_line)
+        payload["timestamp"] = "2026-06-19T10:00:00Z"
+        payload.delete("time")
+        payload.delete("severity")
+        payload.fetch("julewire").delete("kind")
+
+        decoded = Core::CLI::LogFormats.decode(payload, format: :gcp)
+
+        assert_equal(
+          { timestamp: "2026-06-19T10:00:00Z", severity: :info, kind: :point },
+          record_base(decoded).slice(:timestamp, :severity, :kind)
+        )
+      end
+
+      def test_gcp_log_decoder_rejects_non_gcp_shapes
+        assert_false GCP::LogDecoder.match?({})
+        assert_false GCP::LogDecoder.match?("julewire" => "not an envelope")
+      end
+
+      def test_gcp_log_decoder_accepts_hash_subclass_envelope
+        envelope = Class.new(Hash).new
+
+        assert_true GCP::LogDecoder.match?("julewire" => envelope)
+      end
+
+      def test_gcp_log_decoder_treats_missing_optional_base_fields_as_nil
+        decoded = Core::CLI::LogFormats.decode(minimal_gcp_payload, format: :gcp)
+
+        assert_equal(
+          {
+            timestamp: "2026-06-19T10:00:00Z",
+            severity: :info,
+            kind: :point,
+            event: nil,
+            message: nil,
+            logger: nil,
+            source: nil
+          },
+          record_base(decoded)
+        )
+      end
+
+      def test_gcp_log_decoder_treats_missing_timestamp_as_nil
+        payload = minimal_gcp_payload.dup
+        payload.delete("timestamp")
+
+        decoded = Core::CLI::LogFormats.decode(payload, format: :gcp)
+
+        assert_nil decoded.fetch(:timestamp)
+      end
+
+      def test_gcp_log_decoder_treats_missing_optional_sections_as_empty
+        decoded = Core::CLI::LogFormats.decode(minimal_gcp_payload, format: :gcp)
+
+        assert_equal({}, decoded.fetch(:execution))
+        assert_equal({}, decoded.fetch(:context))
+        assert_equal({}, decoded.fetch(:metrics))
+        assert_equal({}, decoded.fetch(:attributes))
+        assert_equal({}, decoded.fetch(:labels))
+        assert_equal({}, decoded.fetch(:payload))
+        assert_nil decoded.fetch(:error)
+      end
+
+      def test_gcp_log_decoder_uses_top_level_sections_not_owned_by_gcp_envelope
+        payload = minimal_gcp_payload.merge(
+          "attributes" => { "rails" => { "status" => 200 } },
+          "payload" => { "worker_pid" => 123 }
+        )
+
+        decoded = Core::CLI::LogFormats.decode(payload, format: :gcp)
+
+        assert_equal({ rails: { status: 200 } }, decoded.fetch(:attributes))
+        assert_equal({ worker_pid: 123 }, decoded.fetch(:payload))
+      end
+
       private
+
+      def minimal_gcp_payload
+        {
+          "timestamp" => "2026-06-19T10:00:00Z",
+          "julewire" => {
+            "kind" => "point"
+          }
+        }
+      end
+
+      def record_base(record)
+        record.slice(:timestamp, :severity, :kind, :event, :message, :logger, :source)
+      end
 
       def gcp_round_trip_record
         Core::Records::Draft.build(gcp_round_trip_input, context: {}, scope: nil).to_record

@@ -77,7 +77,7 @@ module Julewire
             return :drop if value.nil?
             return if @threshold == HASH_SPACE
 
-            Sampling.stable_hash(value) < @threshold ? nil : :drop
+            :drop unless Sampling.stable_hash(value) < @threshold
           end
 
           private
@@ -98,8 +98,6 @@ module Julewire
           end
 
           def field_value(hash, key)
-            return unless hash.is_a?(Hash)
-
             Fields::FieldSet.value_for(hash, key)
           end
         end

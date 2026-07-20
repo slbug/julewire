@@ -11,10 +11,8 @@ module Julewire
           no_output_dropped
           processor_dropped
           processor_error
+          processor_invalid
         ].freeze
-        EMPTY_HASH = {}.freeze
-        private_constant :EMPTY_HASH
-
         # @api integration_spi
         # Integration-facing raw/normalized record pipeline.
         def initialize(configuration:, invalid_severity_reporter: Diagnostics::InvalidSeverityReporter.counter)
@@ -32,11 +30,11 @@ module Julewire
           initialize_tracking
         end
 
-        def emit(input = Core::UNSET, **fields, &)
+        def emit(input = UNSET, **fields, &)
           emit_with_level_check(input, true, fields, &)
         end
 
-        def emit_without_level(input = Core::UNSET, **fields, &)
+        def emit_without_level(input = UNSET, **fields, &)
           emit_with_level_check(input, false, fields, &)
         end
 
@@ -50,7 +48,7 @@ module Julewire
         # Runtime summaries already carry their captured scope fields.
         def emit_isolated_input(input, enforce_level: true)
           emit_input_with_guard(input, enforce_level: enforce_level, lazy: false) do
-            build_isolated_draft(input)
+            build_isolated_owned_draft(input)
           end
         end
 
@@ -109,7 +107,6 @@ module Julewire
           {
             encoder: Serialization::JsonEncoder.new(max_backtrace_lines: configuration.error_backtrace_lines),
             formatter: Records::Formatter.new,
-            error_backtrace_lines: configuration.error_backtrace_lines,
             on_drop: configuration.on_drop,
             on_failure: configuration.on_failure
           }
@@ -124,9 +121,10 @@ module Julewire
 
         def build_processor_chain(configuration)
           ProcessorChain.new(
-            processors: configuration.processors.to_a.freeze,
-            error_backtrace_lines: @error_backtrace_lines,
-            on_error: method(:record_processor_error)
+            processors: configuration.processors.to_a,
+            on_error: method(:record_processor_error),
+            on_invalid: method(:record_invalid_processor_result),
+            on_invalid_draft: method(:record_invalid_processor_draft)
           )
         end
 
@@ -146,7 +144,7 @@ module Julewire
           if raw_input_blocked?(input, enforce_level: enforce_level, lazy: lazy)
             increment_pipeline_counter(:level_dropped)
           else
-            emit_prepared_draft(yield, enforce_level: enforce_level, merge_static_labels: false)
+            emit_prepared_draft(yield, enforce_level: enforce_level)
           end
           finish_emit_attempt(degradation_marker)
         rescue StandardError => e
@@ -159,7 +157,6 @@ module Julewire
           return false unless @destinations.empty?
 
           record_no_output_drop
-          true
         end
 
         def finish_emit_attempt(degradation_marker)
@@ -171,9 +168,7 @@ module Julewire
           Records::Record.validate_normalized!(record)
           return emit_fast_record(record, enforce_level: enforce_level) if fast_record_path?
 
-          emit_prepared_draft(Records::Draft.from_record(record, freeze_sections: false),
-                              enforce_level: enforce_level)
-          nil
+          emit_prepared_draft(Records::Draft.from_record(record), enforce_level: enforce_level)
         end
 
         def fast_record_path?
@@ -188,7 +183,6 @@ module Julewire
 
           increment_pipeline_counter(:entered)
           emit_to_destinations(record)
-          nil
         end
 
         def raw_input_blocked?(input, enforce_level:, lazy:)
@@ -210,14 +204,14 @@ module Julewire
           )
         end
 
-        def build_isolated_draft(input, input_owned: false)
+        def build_isolated_owned_draft(input)
           build_draft_from(
             input,
-            input_owned: input_owned,
-            context: EMPTY_HASH,
-            neutral: EMPTY_HASH,
-            attributes: EMPTY_HASH,
-            carry: EMPTY_HASH,
+            input_owned: true,
+            context: nil,
+            neutral: nil,
+            attributes: nil,
+            carry: nil,
             scope: nil
           )
         end
@@ -229,9 +223,7 @@ module Julewire
             neutral: neutral,
             attributes: attributes,
             carry: carry,
-            static_labels: @labels,
             input_owned: input_owned,
-            freeze_sections: @processors_empty,
             scope: scope,
             error_backtrace_lines: @error_backtrace_lines,
             invalid_severity_reporter: @invalid_severity_reporter
@@ -241,7 +233,6 @@ module Julewire
         def initialize_tracking
           @health = Diagnostics::Health.new(
             counter_keys: COUNTER_KEYS,
-            callback_metadata: {},
             callback_failure_counter: :callback_error
           )
         end
@@ -267,13 +258,13 @@ module Julewire
           @threshold.allow?(record_or_draft.fetch(:severity))
         end
 
-        def emit_prepared_draft(draft, enforce_level:, merge_static_labels: true)
+        def emit_prepared_draft(draft, enforce_level:)
           if enforce_level && !emit_record?(draft)
             increment_pipeline_counter(:level_dropped)
             return
           end
 
-          draft = merge_static_labels(draft) if merge_static_labels
+          draft = merge_static_labels(draft)
           increment_pipeline_counter(:entered)
           emit_processed_draft(draft, enforce_level: enforce_level)
         rescue StandardError => e
@@ -289,9 +280,12 @@ module Julewire
             return
           end
 
-          processed, enforce_processed_level = processed_draft_and_level(processed, enforce_level)
+          if processed.instance_of?(ProcessorChain::ErrorResult)
+            processed = processed.draft
+            enforce_level = false
+          end
 
-          if enforce_processed_level && !emit_record?(processed)
+          if enforce_level && !emit_record?(processed)
             increment_pipeline_counter(:level_dropped)
             return
           end
@@ -299,27 +293,40 @@ module Julewire
           emit_to_destinations(processed.to_record)
         end
 
-        def processed_draft_and_level(processed, default_enforce_level)
-          if processed.is_a?(ProcessorChain::ErrorResult)
-            [processed.draft, false]
-          else
-            [processed, default_enforce_level]
-          end
-        end
-
         def record_processor_error(error, record_metadata)
           increment_pipeline_counter(:processor_error)
           notify_failure(error, phase: :processor, record_metadata: record_metadata)
         end
 
+        def record_invalid_processor_result(processor_name, result, record_metadata)
+          increment_pipeline_counter(:processor_invalid)
+          error, metadata = InvalidResultFailure.build(
+            message: "processor returned unsupported result",
+            phase: :processor_result,
+            processor_name: processor_name,
+            record_metadata: record_metadata,
+            result: result
+          )
+          notify_failure(error, **metadata)
+        end
+
+        def record_invalid_processor_draft(processor_name, error, record_metadata)
+          increment_pipeline_counter(:processor_invalid)
+          notify_failure(
+            error,
+            phase: :processor_data,
+            processor: processor_name,
+            record_metadata: record_metadata
+          )
+        end
+
         def emit_internal_error_record(error)
           emit_prepared_draft(
-            Diagnostics::InternalRecords.emit_error(error, error_backtrace_lines: @error_backtrace_lines),
+            Diagnostics::InternalRecords.emit_error(error),
             enforce_level: false
           )
         rescue StandardError => e
           notify_failure(e, phase: :internal_error_record)
-          nil
         end
 
         def emit_to_destinations(record)
@@ -328,7 +335,6 @@ module Julewire
 
         def record_no_output_drop
           increment_pipeline_counter(:no_output_dropped)
-          nil
         end
 
         def notify_failure(error, **metadata)

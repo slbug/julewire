@@ -25,13 +25,7 @@ module Julewire
       module Hex
         class << self
           def zero?(value)
-            offset = 0
-            while offset < value.bytesize
-              return false unless value.getbyte(offset) == 48
-
-              offset += 1
-            end
-            true
+            value.each_byte.all? { it == 48 }
           end
         end
       end

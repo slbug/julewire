@@ -6,6 +6,18 @@ require "stringio"
 
 module Julewire
   class TestPipelineProcessorErrors < Minitest::Test
+    cover "Julewire::Core::Processing::InvalidResultFailure*"
+    cover Julewire::Core::Processing::Pipeline
+    cover "Julewire::Core::Processing::ProcessorChain*"
+    cover "Julewire::Core::Processing::Pipeline#emit_fast_record"
+    cover "Julewire::Core::Processing::Pipeline#emit_input_with_guard"
+    cover "Julewire::Core::Processing::Pipeline#emit_internal_error_record"
+    cover "Julewire::Core::Processing::Pipeline#emit_prepared_draft"
+    cover "Julewire::Core::Processing::Pipeline#emit_processed_draft"
+    cover "Julewire::Core::Processing::Pipeline#emit_with_level_check"
+    cover Julewire::Core::Records::Draft
+    cover "Julewire::Core::Records::Draft::Builder*"
+
     class ToHRaisingRecord < Julewire::Core::Records::Record
       def to_h
         raise "to_h should not be called"
@@ -14,20 +26,32 @@ module Julewire
 
     def test_pipeline_ignores_ordinary_processor_results
       output = StringIO.new
+      failures = Queue.new
       pipeline = build_pipeline(
         labels: { service: "core" },
         processors: [->(_record) { "not a record" }],
+        on_failure: ->(error, metadata) { failures << [error, metadata] },
         output: output
       )
 
       pipeline.emit(message: "hello")
 
       record = JSON.parse(output.string)
+      error, metadata = safe_queue_pop(failures)
 
       assert_equal "log", record["event"]
       assert_equal "hello", record["message"]
       assert_equal "core", record.dig("labels", "service")
       assert_equal 0, pipeline.health.dig(:counts, :processor_error)
+      assert_equal 1, pipeline.health.dig(:counts, :processor_invalid)
+      assert_equal :processor_result, pipeline.health.dig(:last_failure, :phase)
+      assert_equal "String", pipeline.health.dig(:last_failure, :result_class)
+      assert_equal "processor returned unsupported result", error.message
+      assert_equal :processor_result, metadata.fetch(:phase)
+      assert_match(/Proc|lambda/, metadata.fetch(:processor))
+      assert_equal "String", metadata.fetch(:result_class)
+      assert_equal "log", metadata.dig(:record_metadata, :event)
+      assert_equal({ service: "core" }, metadata.dig(:record_metadata, :labels))
     end
 
     def test_processor_nil_result_is_noop
@@ -43,6 +67,7 @@ module Julewire
       assert_equal "log", record.fetch("event")
       assert_equal "hello", record.fetch("message")
       assert_equal 0, pipeline.health.dig(:counts, :processor_error)
+      assert_equal 0, pipeline.health.dig(:counts, :processor_invalid)
     end
 
     def test_processor_failure_callback_failure_is_visible_in_pipeline_health
@@ -77,6 +102,22 @@ module Julewire
       assert_equal "julewire.processor_error", record.fetch("event")
       assert_equal "Julewire processor failed", record.fetch("message")
       assert_equal 1, Julewire.health.dig(:pipeline, :counts, :processor_error)
+    end
+
+    def test_fail_closed_processor_error_bypasses_threshold_for_emit_without_level
+      output = StringIO.new
+      pipeline = build_pipeline(
+        level: :fatal,
+        output: output,
+        processors: [->(_record) { raise "processor boom" }]
+      )
+
+      pipeline.emit_without_level(severity: :debug, message: "below threshold")
+
+      record = JSON.parse(output.string)
+
+      assert_equal "julewire.processor_error", record.fetch("event")
+      assert_equal 1, pipeline.health.dig(:counts, :processor_error)
     end
 
     def test_pipeline_degraded_status_recovers_after_later_successful_emit
@@ -136,9 +177,10 @@ module Julewire
       assert_equal 1, health.dig(:counts, :processor_dropped)
     end
 
-    def test_final_record_boundary_reports_non_raising_processor_corruption_as_emit_record_failure
+    def test_processor_corruption_is_attributed_and_stops_later_processors
       failures = Queue.new
       output = StringIO.new
+      later_processor_called = false
       processor = lambda do |record|
         record.transform_record! do |data|
           data.dup.tap { it.delete(:event) }
@@ -147,18 +189,65 @@ module Julewire
       pipeline = build_pipeline(
         on_failure: ->(_error, metadata) { failures << metadata },
         output: output,
-        processors: [processor]
+        processors: [processor, ->(_record) { later_processor_called = true }]
       )
 
       pipeline.emit(event: "work.started", source: "app", labels: { service: "core" })
 
-      failure_metadata = failures.pop
+      failure_metadata = safe_queue_pop(failures)
 
       assert_empty output.string
-      assert_equal 0, pipeline.health.dig(:counts, :processor_error)
-      assert_equal :emit_record, failure_metadata.fetch(:phase)
-      refute failure_metadata.dig(:record_metadata, :event)
+      assert_false later_processor_called
+      assert_equal 1, pipeline.health.dig(:counts, :processor_invalid)
+      assert_equal 1, pipeline.health.dig(:counts, :processor_dropped)
+      assert_equal :processor_data, failure_metadata.fetch(:phase)
+      assert_equal "Proc", failure_metadata.fetch(:processor)
+      assert_equal "TypeError", pipeline.health.dig(:last_failure, :class)
+      assert_nil failure_metadata.dig(:record_metadata, :event)
       assert_equal({ service: "core" }, failure_metadata.dig(:record_metadata, :labels))
+    end
+
+    def test_fail_open_does_not_continue_after_a_processor_raises_with_corrupted_data
+      output = StringIO.new
+      later_processor_called = false
+      Julewire.configure do |config|
+        configure_destination(config, output: output)
+        config.processors.use(lambda { |draft|
+          draft.fetch(:payload)["bad"] = true
+          raise "processor failed after mutation"
+        }, on_error: :fail_open)
+        config.processors.use(->(_draft) { later_processor_called = true })
+      end
+
+      Julewire.emit(message: "hello")
+
+      assert_empty output.string
+      assert_false later_processor_called
+      assert_equal 1, Julewire.health.dig(:pipeline, :counts, :processor_error)
+      assert_equal 1, Julewire.health.dig(:pipeline, :counts, :processor_invalid)
+      assert_equal 1, Julewire.health.dig(:pipeline, :counts, :processor_dropped)
+      assert_equal :processor_data, Julewire.health.dig(:pipeline, :last_failure, :phase)
+      assert_equal "TypeError", Julewire.health.dig(:pipeline, :last_failure, :class)
+    end
+
+    def test_non_hash_processor_replacement_is_still_reported_as_invalid_data
+      output = StringIO.new
+      later_processor_called = false
+      pipeline = build_pipeline(
+        output: output,
+        processors: [
+          ->(draft) { draft.transform_record! { nil } },
+          ->(_draft) { later_processor_called = true }
+        ]
+      )
+
+      pipeline.emit(message: "hello")
+
+      assert_empty output.string
+      assert_false later_processor_called
+      assert_equal 1, pipeline.health.dig(:counts, :processor_invalid)
+      assert_equal :processor_data, pipeline.health.dig(:last_failure, :phase)
+      assert_empty pipeline.health.dig(:last_failure, :record)
     end
 
     def test_direct_section_mutation_is_allowed_on_processor_drafts
@@ -252,8 +341,8 @@ module Julewire
     def assert_fail_open_record(record, health)
       assert_equal "log", record.fetch("event")
       assert_equal "hello", record.fetch("message")
-      assert record.dig("payload", "before_error")
-      assert record.dig("payload", "after_error")
+      assert_true record.dig("payload", "before_error")
+      assert_true record.dig("payload", "after_error")
       assert_equal 1, health.dig(:counts, :processor_error)
       assert_equal 0, health.dig(:counts, :processor_dropped)
     end

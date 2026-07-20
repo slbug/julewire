@@ -7,6 +7,14 @@ on:
 
   pull_request:
 
+  workflow_dispatch:
+    inputs:
+      run_mutant_changes:
+        description: Run Mutant Changes after every other CI job succeeds
+        required: false
+        default: false
+        type: boolean
+
 permissions:
   contents: read
   id-token: write
@@ -42,6 +50,8 @@ jobs:
               - '.gitignore'
               - '.rubocop.yml'
               - 'Rakefile'
+              - 'codecov.yml'
+              - 'support/**'
             release_metadata:
               - 'Rakefile'
               - 'gems/*/*.gemspec'
@@ -84,6 +94,70 @@ jobs:
 
       - name: Check release metadata
         run: ruby -S rake release:check
+
+  mutant-targets:
+    runs-on: ubuntu-latest
+    name: mutant targets
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+
+      - name: Check generated mutant targets
+        run: ruby -S rake mutant:targets:check
+
+  mutant-runtime-targets:
+    runs-on: ubuntu-latest
+    name: mutant runtime targets / ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            dir: gems/core
+          - name: active_job
+            dir: gems/active_job
+          - name: rails
+            dir: gems/rails
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+          working-directory: ${{ matrix.dir }}
+
+      - name: Check loaded Mutant subjects
+        env:
+          BUNDLE_GEMFILE: ${{ matrix.dir }}/Gemfile
+          GEM_DIR: ${{ matrix.dir }}
+        run: bundle exec ruby -S rake mutant:targets:runtime
+
+  repository-policy:
+    runs-on: ubuntu-latest
+    name: repository policy
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+          working-directory: gems/core
+
+      - name: Check boundaries, API tags, and production duplication
+        env:
+          BUNDLE_GEMFILE: gems/core/Gemfile
+        run: bundle exec ruby -S rake all:boundaries all:api_tags all:flay
 
   core:
     needs: changes
@@ -569,6 +643,40 @@ jobs:
           flags: semantic_logger,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
+  semantic-logger-appraisal:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.semantic_logger == 'true' }}
+    runs-on: ubuntu-latest
+    name: semantic_logger appraisal / Ruby 4.0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+          bundler-cache: true
+          working-directory: gems/semantic_logger
+
+      - name: Run Semantic Logger 4 and 5 suites
+        working-directory: gems/semantic_logger
+        env:
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: test/reports
+        run: bundle exec rake appraisal:test
+
+      - name: Upload appraisal test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/semantic_logger/test/reports/semantic_logger_4/TEST-minitest.xml,./gems/semantic_logger/test/reports/semantic_logger_5/TEST-minitest.xml
+          disable_search: true
+          flags: semantic_logger_appraisal,ruby-4.0
+          fail_ci_if_error: true
+
   ractor:
     needs: changes
     if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ractor == 'true' }}
@@ -614,42 +722,78 @@ jobs:
           fail_ci_if_error: true
 
   mutant:
-    needs: changes
+    needs:
+      - changes
+      - release-check
+      - mutant-targets
+      - mutant-runtime-targets
+      - repository-policy
+      - core
+      - active_job
+      - gcp
+      - karafka
+      - rails
+      - rack
+      - rails-appraisal
+      - rails_support
+      - redaction
+      - semantic_logger
+      - semantic-logger-appraisal
+      - ractor
     if: >-
       ${{
-        needs.changes.outputs.shared == 'true' ||
-        needs.changes.outputs.core == 'true' ||
-        needs.changes.outputs.active_job == 'true' ||
-        needs.changes.outputs.gcp == 'true' ||
-        needs.changes.outputs.karafka == 'true' ||
-        needs.changes.outputs.rack == 'true' ||
-        needs.changes.outputs.ractor == 'true' ||
-        needs.changes.outputs.rails == 'true' ||
-        needs.changes.outputs.rails_support == 'true' ||
-        needs.changes.outputs.redaction == 'true' ||
-        needs.changes.outputs.semantic_logger == 'true'
+        always() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.run_mutant_changes == true &&
+        !contains(needs.*.result, 'failure') &&
+        !contains(needs.*.result, 'cancelled') &&
+        (
+          needs.changes.outputs.shared == 'true' ||
+          needs.changes.outputs.core == 'true' ||
+          needs.changes.outputs.active_job == 'true' ||
+          needs.changes.outputs.gcp == 'true' ||
+          needs.changes.outputs.karafka == 'true' ||
+          needs.changes.outputs.rack == 'true' ||
+          needs.changes.outputs.ractor == 'true' ||
+          needs.changes.outputs.rails == 'true' ||
+          needs.changes.outputs.rails_support == 'true' ||
+          needs.changes.outputs.redaction == 'true' ||
+          needs.changes.outputs.semantic_logger == 'true'
+        )
       }}
     runs-on: ubuntu-latest
-    name: mutant / Ruby 4.0
+    name: mutant changes (manual) / Ruby 4.0
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '4.0'
 
-      - name: Run primary mutation subjects
+      - name: Run configured mutation subjects
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SINCE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
+
+          if [[ -z "$SINCE_SHA" ]]; then
+            SINCE_SHA="$(git merge-base HEAD "origin/$DEFAULT_BRANCH")"
+          fi
+          if [[ "$SINCE_SHA" =~ ^0+$ ]] || ! git cat-file -e "${SINCE_SHA}^{commit}" 2>/dev/null; then
+            SINCE_SHA="$(git rev-parse HEAD^ 2>/dev/null || git hash-object -t tree /dev/null)"
+          fi
+          export SINCE_SHA
 
           run_mutant() {
             local dir="$1"
             local task="$2"
 
             (cd "$dir" && bundle install)
-            ruby -S rake "mutant:${task}"
+            ruby -S rake "mutant:${task}:changes"
           }
 
           if [[ "${{ needs.changes.outputs.shared }}" == "true" || "${{ needs.changes.outputs.core }}" == "true" ]]; then

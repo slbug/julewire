@@ -27,10 +27,11 @@ string or symbol keys defensively. Processors receive a mutable
 ```
 
 Raw input is normalized through `Julewire::RecordDraft.build`, then processors
-mutate the draft owned by the current emit. After processors finish, core
-validates the draft and freezes it through `Julewire::RecordDraft#to_record`
-before destinations and formatters see it. Immutable `Record` objects are not
-the public raw-input construction API.
+mutate the draft owned by the current emit. Core validates the draft after
+every processor, then freezes it through `Julewire::RecordDraft#to_record`
+before destinations and formatters see it. A malformed processor result is
+attributed to that processor and never reaches the next one. Immutable
+`Record` objects are not the public raw-input construction API.
 
 `Julewire::RecordFormatter` turns that normalized record into a public log
 projection. It omits internal keys such as `:carry` and execution lineage
@@ -58,6 +59,11 @@ process warning, and counts the normalization in health with value class plus
 source/event metadata when available. Level filtering then applies normally, so
 an invalid explicit severity can still be dropped when `config.level` is above
 `:info`. Configuration severities remain strict.
+
+Severity Symbols are the canonical lowercase values `:debug`, `:info`, `:warn`,
+`:error`, `:fatal`, and `:unknown`. String ingress is case-insensitive and
+standard-library Logger severity integers are accepted. Non-canonical Symbols
+are invalid rather than silently rewritten at an internal or cross-gem boundary.
 
 ## Structured Sections
 
@@ -87,12 +93,37 @@ Julewire.emit(payload: "raw")
 ```
 
 Runtime mutation helpers are forgiving for the same reason: logging should not
-crash the app.
+crash the app when a positional field value is not a hash.
 
 String keys inside structured sections are normalized to symbols before
 processors and destinations run. Encoders and custom destinations may convert
 the record to string-key payloads, but the core Ruby record contract stays
 symbol-keyed.
+
+## Key Boundaries
+
+Public application input and decoded propagation envelopes may use String or
+Symbol keys. Core converts String keys to Symbols once as those values enter
+core. Other key types are invalid; they are never stringified or silently
+accepted.
+
+Integration-owned, bridge-owned, processor-owned, and normalized-record sections
+are different: each section must be a Hash and every recursive hash key must
+already be a Symbol. They are strict contracts, not another normalization
+boundary. Core does not convert their String keys. JSON carrier extraction is
+the explicit exception because JSON decode is wire ingress and necessarily
+produces String keys.
+
+Direct constructors and integration field APIs raise `TypeError` for a non-Hash
+section or invalid key. Strict owned validation visits every recursive
+container iteratively, including data deeper than the later copy bound. A
+normal `emit` contains such a failure: it drops the invalid
+record, records the failure in health and `on_failure`, and does not raise into
+application code. Integration input is validated recursively before draft
+construction or any configured processor. Unknown integration top-level fields
+are errors instead of being ignored; integrations put custom data in
+`:payload`, `:attributes`, or another documented section. An unconfigured
+pipeline drops before record construction, as it does for every emit.
 
 ## Optional Metadata
 

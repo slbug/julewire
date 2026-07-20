@@ -6,7 +6,7 @@ module Julewire
     module Destinations
       class Collection
         def initialize(destinations, on_drop:, on_failure:)
-          @destinations = destinations.freeze
+          @destinations = destinations.dup.freeze
           @on_drop = on_drop
           @on_failure = on_failure
         end
@@ -23,9 +23,9 @@ module Julewire
           private
 
           def validate_destinations(destinations)
-            destinations.map do |destination|
+            destinations.each do |destination|
               Registry.validate!(destination)
-            end.freeze
+            end
           end
         end
 
@@ -76,7 +76,7 @@ module Julewire
 
           lifecycle_destinations(skip_resource_identities).each do |destination|
             remaining_timeout = Scheduling::Deadline.remaining(deadline)
-            if attempted && deadline && remaining_timeout <= 0
+            if attempted && deadline && remaining_timeout.zero?
               ok = false
               break
             end
@@ -96,7 +96,7 @@ module Julewire
         def lifecycle_destinations(skip_resource_identities)
           return @destinations unless skip_resource_identities
 
-          @destinations.reject { skip_lifecycle_destination?(it, skip_resource_identities) }
+          @destinations.reject { skip_resource_identities.key?(resource_identity(it)) }
         end
 
         def call_destination_after_fork(destination)
@@ -108,13 +108,6 @@ module Julewire
             destination: destination_name(destination),
             phase: :destination_lifecycle
           )
-          nil
-        end
-
-        def skip_lifecycle_destination?(destination, identities)
-          return false unless identities
-
-          identities.key?(resource_identity(destination))
         end
 
         def resource_identity(destination)
@@ -125,7 +118,7 @@ module Julewire
 
         def emit_to_destination(destination, record)
           result = destination.emit(record)
-          record_drop(:destination_rejected, destination, record) if result == false
+          record_drop(:destination_rejected, metadata: destination_metadata(destination, record)) if result == false
         rescue StandardError => e
           metadata = destination_metadata(destination, record)
           notify_failure(
@@ -133,8 +126,7 @@ module Julewire
             **metadata,
             phase: :destination
           )
-          record_drop(:destination_exception, destination, record, metadata: metadata)
-          nil
+          record_drop(:destination_exception, metadata: metadata)
         end
 
         def destination_name(destination)
@@ -161,7 +153,7 @@ module Julewire
           @on_failure.call(error, **metadata)
         end
 
-        def record_drop(reason, destination, record, metadata: destination_metadata(destination, record))
+        def record_drop(reason, metadata:)
           @on_drop.call(reason, phase: :destination, **metadata)
         end
 

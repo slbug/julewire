@@ -5,6 +5,7 @@ require "json"
 
 module Julewire
   class TestWireFixtures < Minitest::Test
+    cover Julewire::Core::Propagation::Carrier
     def test_propagation_fixture_matches_wire_shape
       assert_equal wire_fixture("propagation"), serialized_propagation_fixture_envelope
     end

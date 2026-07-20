@@ -4,8 +4,8 @@ require "test_helper"
 
 module Julewire
   class TestIntegrationFieldOverlays < Minitest::Test
-    cover Julewire::Core::Fields::FieldStack
-
+    cover Julewire::Core::Integration::Facade
+    cover Julewire::Core::Fields::Bags
     OVERLAY_CASES = [
       {
         event: "message.processed",
@@ -68,13 +68,51 @@ module Julewire
       end
     end
 
-    def test_with_field_overlays_ignore_non_hash_fields
+    def test_with_field_overlays_reject_non_hash_fields
+      {
+        with_context: nil,
+        with_carry: "trace-1",
+        with_attributes: Object.new,
+        with_neutral: false
+      }.each do |method_name, fields|
+        error = assert_raises(TypeError, method_name.to_s) do
+          Julewire::Core::Integration::Facade.public_send(method_name, fields) { flunk "invalid owned input yielded" }
+        end
+
+        assert_equal "owned data must be a Hash", error.message
+      end
+    end
+
+    def test_with_field_overlays_require_blocks
+      %i[with_context with_carry with_attributes with_neutral].each do |method_name|
+        error = assert_raises(ArgumentError) do
+          Julewire::Core::Integration::Facade.public_send(method_name, {})
+        end
+
+        assert_equal "block required", error.message
+      end
+    end
+
+    def test_integration_field_helpers_reject_non_symbol_keys
+      assert_integration_owned_fields_rejected(
+        { account: { "id" => "acct-1" } },
+        "record must not use string keys"
+      )
+      assert_integration_owned_fields_rejected(
+        { account: { Object.new => "acct-1" } },
+        "record keys must be Symbols"
+      )
+    end
+
+    def test_with_field_overlays_treat_fields_as_owned
+      metadata = fixture_truncation_metadata
+
       records = capture_julewire_records do
-        Julewire::Core::Integration::Facade.with_context(nil) do
-          Julewire::Core::Integration::Facade.with_carry("trace-1") do
-            Julewire::Core::Integration::Facade.with_attributes(Object.new) do
-              Julewire::Core::Integration::Facade.with_neutral(false) do
-                Julewire.emit(event: "ignored.fields", source: "test")
+        Julewire::Core::Integration::Facade.with_context(_julewire_truncation: metadata) do
+          Julewire::Core::Integration::Facade.with_carry(_julewire_truncation: metadata) do
+            Julewire::Core::Integration::Facade.with_attributes(_julewire_truncation: metadata) do
+              Julewire::Core::Integration::Facade.with_neutral(_julewire_truncation: metadata) do
+                Julewire.emit(event: "owned.fields", source: "test")
               end
             end
           end
@@ -83,10 +121,51 @@ module Julewire
 
       point = records.fetch(0)
 
-      assert_empty point.fetch(:context)
-      assert_empty point.fetch(:carry)
-      assert_empty point.fetch(:attributes)
-      assert_empty point.fetch(:neutral)
+      assert_owned_truncation_metadata_sections(point)
+    end
+
+    def test_add_field_overlays_treat_fields_as_owned
+      metadata = fixture_truncation_metadata
+
+      records = capture_julewire_records do
+        Julewire::Core::Integration::Facade.add_context(_julewire_truncation: metadata)
+        Julewire::Core::Integration::Facade.add_carry(_julewire_truncation: metadata)
+        Julewire::Core::Integration::Facade.add_attributes(_julewire_truncation: metadata)
+        Julewire::Core::Integration::Facade.add_neutral(_julewire_truncation: metadata)
+        Julewire.emit(event: "owned.added.fields", source: "test")
+      end
+
+      point = records.fetch(0)
+
+      assert_owned_truncation_metadata_sections(point)
+    end
+
+    def test_with_field_overlays_delegate_to_owned_context_store_sections
+      probe = OverlayStoreProbe.new
+
+      with_overridden_singleton_method(Julewire::Core::ContextStore, :current, proc { probe }) do
+        assert_equal :context, Julewire::Core::Integration::Facade.with_context({ request_id: "req-1" }) { :context }
+        assert_equal :carry, Julewire::Core::Integration::Facade.with_carry({ trace: { id: "trace-1" } }) { :carry }
+        assert_equal :attributes,
+                     Julewire::Core::Integration::Facade.with_attributes({ account: { id: "acct-1" } }) { :attributes }
+        assert_equal :neutral,
+                     Julewire::Core::Integration::Facade.with_neutral({ http: { method: "GET" } }) { :neutral }
+      end
+
+      assert_equal expected_owned_overlay_calls, probe.calls
+    end
+
+    def test_add_field_overlays_delegate_to_owned_context_store_sections
+      probe = OverlayStoreProbe.new
+
+      with_overridden_singleton_method(Julewire::Core::ContextStore, :current, proc { probe }) do
+        assert_nil Julewire::Core::Integration::Facade.add_context({ request_id: "req-1" })
+        assert_nil Julewire::Core::Integration::Facade.add_carry({ trace: { id: "trace-1" } })
+        assert_nil Julewire::Core::Integration::Facade.add_attributes({ account: { id: "acct-1" } })
+        assert_nil Julewire::Core::Integration::Facade.add_neutral({ http: { method: "GET" } })
+      end
+
+      assert_equal expected_owned_overlay_calls, probe.calls
     end
 
     def test_integration_facade_respects_field_bag_write_capabilities
@@ -102,6 +181,18 @@ module Julewire
 
           assert_equal "integration cannot write attributes", error.message
         end
+      end
+    end
+
+    def test_integration_facade_overlay_respects_field_bag_write_capabilities
+      replacement = proc { %i[context summary] }
+
+      with_overridden_singleton_method(Julewire::Core::Fields::Bags, :integration_write_sections, replacement) do
+        error = assert_raises(ArgumentError) do
+          Julewire::Core::Integration::Facade.with_attributes(secret: "nope") { :unused }
+        end
+
+        assert_equal "integration cannot write attributes", error.message
       end
     end
 
@@ -161,6 +252,95 @@ module Julewire
       assert_equal "trace-1", point.dig(:carry, :trace, :id)
       assert_equal attribute_value, point.dig(:attributes, *attribute_path)
       assert_equal neutral_value, point.dig(:neutral, *neutral_path)
+    end
+
+    def assert_owned_truncation_metadata_sections(record)
+      %i[context carry attributes neutral].each do |section|
+        assert_equal ["ids"], record.dig(section, :_julewire_truncation, :truncated_fields)
+      end
+    end
+
+    def expected_owned_overlay_calls
+      [
+        [:context, { request_id: "req-1" }, true],
+        [:carry, { trace: { id: "trace-1" } }, true],
+        [:attributes, { account: { id: "acct-1" } }, true],
+        [:neutral, { http: { method: "GET" } }, true]
+      ]
+    end
+
+    def assert_integration_owned_fields_rejected(fields, message)
+      %i[add_context add_carry add_attributes add_neutral].each do |method_name|
+        assert_raises_message(TypeError, message) { Julewire::Core::Integration::Facade.public_send(method_name, fields) }
+      end
+
+      %i[with_context with_carry with_attributes with_neutral].each do |method_name|
+        assert_raises_message(TypeError, message) do
+          Julewire::Core::Integration::Facade.public_send(method_name, fields) { :unreachable }
+        end
+      end
+
+      assert_raises_message(TypeError, message) do
+        Julewire::Core::Integration::Facade.with_execution(type: :job, attributes: fields) { :unreachable }
+      end
+
+      Julewire.with_execution(type: :job, emit_summary: false) do
+        %i[add_summary_attributes add_summary_neutral].each do |method_name|
+          assert_raises_message(TypeError, message) { Julewire::Core::Integration::Facade.public_send(method_name, fields) }
+        end
+      end
+    end
+
+    class OverlayStoreProbe
+      attr_reader :calls
+
+      def initialize
+        @calls = []
+      end
+
+      def with_context(fields, owned:, &)
+        call_section(:context, fields, owned, &)
+      end
+
+      def with_carry(fields, owned:, &)
+        call_section(:carry, fields, owned, &)
+      end
+
+      def with_attributes(fields, owned:, &)
+        call_section(:attributes, fields, owned, &)
+      end
+
+      def with_neutral(fields, owned:, &)
+        call_section(:neutral, fields, owned, &)
+      end
+
+      def add_context(fields, owned:)
+        record_section(:context, fields, owned)
+      end
+
+      def add_carry(fields, owned:)
+        record_section(:carry, fields, owned)
+      end
+
+      def add_attributes(fields, owned:)
+        record_section(:attributes, fields, owned)
+      end
+
+      def add_neutral(fields, owned:)
+        record_section(:neutral, fields, owned)
+      end
+
+      private
+
+      def call_section(section, fields, owned)
+        @calls << [section, fields, owned]
+        yield
+      end
+
+      def record_section(section, fields, owned)
+        @calls << [section, fields, owned]
+        nil
+      end
     end
   end
 end

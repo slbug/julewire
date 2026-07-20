@@ -4,9 +4,8 @@ require "test_helper"
 
 module Julewire
   class TestKarafkaPayloadReader < Minitest::Test
-    include JulewireCapture
-
     cover Julewire::Karafka::PayloadReader
+    include JulewireCapture
 
     RaisingReader = KarafkaTestSupport::RaisingReader
     Message = Data.define(:topic, :partition, :offset, :key, :headers)

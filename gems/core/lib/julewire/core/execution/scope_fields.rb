@@ -4,9 +4,6 @@ module Julewire
   module Core
     module Execution
       class ScopeFields
-        EMPTY_HASH = {}.freeze
-        private_constant :EMPTY_HASH
-
         attr_reader :stacks
 
         def initialize(context:, attributes:, labels:, carry:, neutral:)
@@ -36,18 +33,14 @@ module Julewire
         end
 
         def labels_hash
-          return {} if @labels.empty?
-
           Fields::FieldSet.deep_dup(@labels)
         end
 
         def frozen_labels_hash
-          return EMPTY_HASH if @labels.empty?
-
           @frozen_labels_hash ||= Fields::Internal.frozen_copy(@labels)
         end
 
-        def add(section, fields, owned: false)
+        def add(section, fields, owned:)
           @stacks.add(section, fields, owned: owned)
         end
 
@@ -55,7 +48,7 @@ module Julewire
           @stacks.delete(section, path)
         end
 
-        def with(section, fields = nil, owned: false, **keyword_fields, &)
+        def with(section, fields, owned:, **keyword_fields, &)
           @stacks.with(section, fields, owned: owned, **keyword_fields, &)
         end
 
@@ -66,9 +59,7 @@ module Julewire
         private
 
         def normalized_static_hash(value)
-          return EMPTY_HASH if value.is_a?(Hash) && value.empty?
-
-          Fields::FieldSet.deep_symbolize_keys(value)
+          Fields::FieldSet.deep_symbolize_keys(value || {})
         end
       end
     end

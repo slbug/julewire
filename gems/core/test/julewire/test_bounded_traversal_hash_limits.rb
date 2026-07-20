@@ -6,7 +6,6 @@ module Julewire
   class TestBoundedTraversalHashLimits < Minitest::Test
     cover "Julewire::Core::Serialization::BoundedTraversal"
     cover Julewire::Core::Serialization::Serializer
-
     METADATA_KEY = Julewire::Core::Serialization::Serializer::TRUNCATION_METADATA_KEY
 
     def test_serializer_hash_key_limit_counts_input_entries_before_serialized_key_collisions

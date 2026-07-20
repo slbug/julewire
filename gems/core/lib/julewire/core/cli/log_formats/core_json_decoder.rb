@@ -25,9 +25,9 @@ module Julewire
 
             def record_base(source)
               {
-                timestamp: source["timestamp"],
-                severity: Records::Severity.normalize(source["severity"] || :info),
-                kind: RecordDecoder.kind(source["kind"] || :point),
+                timestamp: source.fetch("timestamp"),
+                severity: Records::Severity.normalize(source.fetch("severity")),
+                kind: RecordDecoder.kind(source.fetch("kind")),
                 event: source["event"],
                 message: source["message"],
                 logger: source["logger"],

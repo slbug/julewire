@@ -8,7 +8,7 @@ module Julewire
           def call(response, **) = new(response, **).summary_fields
         end
 
-        def initialize(response, content_types:, limit:, mode: Settings::STRING_BODY)
+        def initialize(response, content_types:, limit:, mode: nil)
           @response = response
           @content_types = content_types
           @limit = limit
@@ -30,7 +30,7 @@ module Julewire
           end
 
           capture(body_parts)
-          return {} if @total_bytes.zero? && @captured.empty?
+          return {} if @total_bytes.zero?
 
           JsonBody.fields(:response, @captured, bytes: @total_bytes, truncated: @truncated, mode: @mode)
         end
@@ -38,11 +38,8 @@ module Julewire
         private
 
         def response_body_parts
-          return unless @response.respond_to?(:stream)
-
           stream = @response.stream
           return if stream.respond_to?(:to_path)
-          return unless stream.respond_to?(:to_ary)
 
           stream.to_ary
         rescue StandardError
@@ -59,9 +56,7 @@ module Julewire
         end
 
         def body_string(part)
-          return part.to_str if part.respond_to?(:to_str)
-
-          nil
+          part.to_str
         rescue StandardError
           nil
         end
@@ -70,7 +65,7 @@ module Julewire
           return unless body_parts.length == 1
 
           body = body_string(body_parts.first)
-          return {} unless body && !body.empty?
+          return unless body && !body.empty?
 
           JsonBody.fields(:response, body, bytes: body.bytesize, truncated: false, mode: @mode)
         end
@@ -82,11 +77,6 @@ module Julewire
           return @captured << body if @limit.nil?
 
           remaining = @limit - @captured.bytesize
-          if remaining <= 0
-            @truncated = true if bytesize.positive?
-            return
-          end
-
           @captured << body.byteslice(0, remaining)
           @truncated = true if bytesize > remaining
         end

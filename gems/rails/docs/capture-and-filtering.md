@@ -31,8 +31,8 @@ Captured response summaries include:
 - `response_body_bytes`
 - `response_body_truncated`
 
-`*_body_bytes` is the content length when the framework provides it; otherwise
-it is the number of bytes observed while capturing.
+`*_body_bytes` is the declared content length or the bytes observed while
+capturing. When both are known, Julewire reports the larger value.
 
 Request and response headers use `false`, `true`, or an explicit header list:
 
@@ -48,7 +48,8 @@ end
 When header capture is `true`, Julewire omits common sensitive headers such as
 `authorization`, `cookie`, `set-cookie`, `proxy-authorization`, and
 `x-api-key`. Use an explicit header list if the application deliberately wants
-one of those fields.
+one of those fields. Treat `headers = true` as controlled debugging; production
+configs should prefer explicit allowlists.
 
 Captured request summaries can include:
 

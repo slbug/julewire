@@ -5,6 +5,10 @@ require "stringio"
 
 module Julewire
   class TestOutputWriteContracts < Minitest::Test
+    cover Julewire::Core::Destinations::Destination
+    cover "Julewire::Core::Destinations::Destination#record_loss"
+    cover Julewire::Core::Destinations::WriteStep
+
     class PlainFalseOutput
       def initialize
         @result = false

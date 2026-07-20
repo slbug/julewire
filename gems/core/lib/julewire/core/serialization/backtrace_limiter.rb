@@ -4,6 +4,9 @@ module Julewire
   module Core
     module Serialization
       class BacktraceLimiter
+        MAX_CAUSE_DEPTH = Core::NORMALIZATION_MAX_DEPTH
+        private_constant :MAX_CAUSE_DEPTH
+
         class << self
           def call(value, max_backtrace_lines:)
             new(max_backtrace_lines: max_backtrace_lines).call(value)
@@ -18,18 +21,18 @@ module Julewire
         end
 
         def call(value)
-          @seen = {}.compare_by_identity
-          limit_backtraces(value)
+          limit_backtraces(value, Set.new.compare_by_identity)
           value
-        ensure
-          @seen = nil
         end
 
         private
 
-        def limit_backtraces(value)
-          while value.is_a?(Hash) && !@seen.key?(value)
-            @seen[value] = true
+        def limit_backtraces(value, seen)
+          MAX_CAUSE_DEPTH.times do
+            break unless value.is_a?(Hash)
+            break if seen.include?(value)
+
+            seen.add(value)
             limit_backtrace_field!(value)
             value = value[:cause]
           end
@@ -40,8 +43,9 @@ module Julewire
 
           if @max_backtrace_lines.zero?
             error.delete(:backtrace)
-          elsif error[:backtrace].is_a?(Array)
-            error[:backtrace] = error[:backtrace].first(@max_backtrace_lines)
+          else
+            backtrace = error.fetch(:backtrace)
+            error[:backtrace] = backtrace.first(@max_backtrace_lines) if backtrace.is_a?(Array)
           end
         end
       end

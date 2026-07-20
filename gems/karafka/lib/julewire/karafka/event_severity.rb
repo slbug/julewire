@@ -37,7 +37,7 @@ module Julewire
 
         def payload_severity(payload)
           value = payload_value(payload, :severity) || payload_value(payload, :level)
-          Julewire::Core::Records::Severity.normalize(value) if value
+          Core::Records::Severity.normalize(value)
         rescue StandardError
           nil
         end
@@ -85,22 +85,14 @@ module Julewire
         end
 
         def raw_event_value(event, key)
-          raw = EventPayload.event_payload(event)
-          return raw[key] if raw.respond_to?(:key?) && raw.key?(key)
-          return raw[key.to_s] if raw.respond_to?(:key?) && raw.key?(key.to_s)
-          return event[key] if event.respond_to?(:[])
-
-          nil
-        rescue StandardError
-          nil
+          Core::Integration::Values::Read.value(EventPayload.event_payload(event), key)
         end
 
         def collection_count(value)
-          return value[:count] if value.is_a?(Hash) && value.key?(:count)
-          return value["count"] if value.is_a?(Hash) && value.key?("count")
-          return value.size if value.respond_to?(:size)
+          count = Core::Integration::Values::Read.hash_value(value, :count, default: Core::UNSET)
+          return count unless count.equal?(Core::UNSET)
 
-          nil
+          value.size if value.respond_to?(:size)
         end
       end
     end

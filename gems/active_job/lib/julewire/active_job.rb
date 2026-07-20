@@ -23,10 +23,6 @@ module Julewire
       def perform(job, &)
         JobExecution.call(job, configuration: config, &)
       end
-
-      def load_railtie_if_rails!
-        Railtie if defined?(::Rails::Railtie)
-      end
     end
   end
 
@@ -34,5 +30,5 @@ module Julewire
   # Rails-only autoload, skipped when non-Rails processes eager load the gem.
   loader.do_not_eager_load("#{__dir__}/active_job/railtie.rb")
   loader.setup
-  Julewire::ActiveJob.load_railtie_if_rails!
+  Julewire::ActiveJob::Railtie if defined?(::Rails::Railtie)
 end

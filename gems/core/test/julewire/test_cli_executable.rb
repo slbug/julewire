@@ -6,6 +6,10 @@ require "rbconfig"
 
 module Julewire
   class TestCLIExecutable < Minitest::Test
+    # Mutant kills the parent test process with SIGKILL on timeout; it cannot
+    # reliably reap this test's child Ruby process.
+    cover "ExternalProcessBoundary"
+
     def test_executable_prints_version
       stdout, stderr, status = Open3.capture3(
         { "RUBYLIB" => core_lib_path },

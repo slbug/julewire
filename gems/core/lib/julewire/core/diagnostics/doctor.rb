@@ -52,7 +52,7 @@ module Julewire
 
         def destination_info(destinations)
           destinations.transform_values do |destination|
-            component_info(destination, include_loss: true)
+            destination_component_info(destination)
           end
         end
 
@@ -62,12 +62,18 @@ module Julewire
           end
         end
 
-        def component_info(component, include_loss: false)
+        def destination_component_info(component)
+          info = component_info(component)
+          last_loss = component[:last_loss]
+          info[:last_loss] = last_loss if last_loss
+          info
+        end
+
+        def component_info(component)
           {
-            counts: component[:counts],
+            counts: component.fetch(:counts),
             last_failure: component[:last_failure],
-            last_loss: include_loss ? component[:last_loss] : nil,
-            status: component[:status]
+            status: component.fetch(:status)
           }.compact
         end
 
@@ -82,7 +88,7 @@ module Julewire
 
         def pipeline_warnings(pipeline, items)
           items << warning(:no_destinations, "pipeline has no destinations") unless pipeline.fetch(:configured)
-          if pipeline.fetch(:configured) && pipeline.fetch(:status) != :ok
+          if pipeline.fetch(:configured) && !pipeline.fetch(:status).equal?(:ok)
             items << warning(:pipeline_degraded, "pipeline is #{pipeline.fetch(:status)}")
           end
           component_warnings(
@@ -99,14 +105,15 @@ module Julewire
 
         def component_warnings(components, items, code:, label:)
           components.each do |name, component|
-            next if component[:status] == :ok
+            status = component.fetch(:status)
+            next if status == :ok
 
-            items << warning(code, "#{label} #{name} is #{component[:status]}")
+            items << warning(code, "#{label} #{name} is #{status}")
           end
         end
 
         def warning(code, message)
-          { code: code, message: message }.freeze
+          { code: code, message: message }
         end
       end
     end

@@ -38,6 +38,10 @@ end
 | `on_failure` | Best-effort callback for contained core failures. |
 | `on_drop` | Best-effort callback for operational drops after a record reaches destination/output handling. |
 
+Severity Symbols must use canonical lowercase values. String configuration
+values are case-insensitive, and standard-library Logger severity integers are
+accepted.
+
 Timeout values must be `nil` or non-negative finite numerics.
 `error_backtrace_lines` must be a non-negative integer.
 
@@ -117,10 +121,11 @@ processors. Output-specific shape belongs in destination formatters. Processors
 are the mutation stage.
 
 Processors receive the current `Julewire::RecordDraft`. Mutate the draft
-directly. Return `:drop` to stop delivery or a different `Julewire::RecordDraft` to
-replace the current draft; any other return value is ignored. Processors own
-the draft until the final record boundary, so direct mutation is the normal hot
-path:
+directly and return `nil` to keep it. Return `:drop` to stop delivery or a
+different `Julewire::RecordDraft` to replace the current draft. Unsupported
+non-`nil` return values keep the current draft but increment `processor_invalid`
+and record last-failure metadata. Processors own the draft until the final
+record boundary, so direct mutation is the normal hot path:
 
 ```ruby
 class AddTenantLabel
@@ -155,11 +160,13 @@ Processor exceptions use the registration policy:
 | `on_error` | Behavior |
 | --- | --- |
 | `:fail_closed` | Default. Emit a `julewire.processor_error` replacement record and stop the chain. |
-| `:fail_open` | Record the failure, keep the current draft, and continue with later processors. |
+| `:fail_open` | Record the failure and continue only when the current draft still satisfies the owned record contract. |
 | `:drop` | Record the failure and suppress the record. |
 
-Public emit input remains defensive. The final immutable record boundary
-validates the Julewire record shape before destinations see it.
+Public emit input remains defensive. Core validates the draft after every
+processor, so a malformed mutation is attributed and dropped before a later
+processor or destination sees it. The final immutable record boundary still
+validates the Julewire record shape.
 
 Destination-local processors run after the global processor chain and before
 one destination formats the record. Use them for sink-specific policy such as

@@ -4,9 +4,11 @@ require "test_helper"
 
 module Julewire
   class TestKarafkaWaterdrop < Minitest::Test
-    include JulewireCapture
-
+    cover "Julewire::Karafka.install!"
     cover Julewire::Karafka::WaterdropMiddleware
+    cover Julewire::Karafka::WaterdropInstaller
+    cover "Julewire::Karafka.inject!"
+    include JulewireCapture
 
     BasicMonitor = KarafkaTestSupport::BasicMonitor
     FakeEvent = KarafkaTestSupport::FakeEvent
@@ -15,6 +17,8 @@ module Julewire
     FakeProducer = KarafkaTestSupport::FakeProducer
     FlakyMonitor = KarafkaTestSupport::FlakyMonitor
     MutableMessage = KarafkaTestSupport::MutableMessage
+    class HashSubclass < Hash
+    end
 
     def setup
       super
@@ -32,6 +36,33 @@ module Julewire
       assert message[:headers]["julewire"]
     end
 
+    def test_waterdrop_middleware_creates_headers_for_hash_messages
+      messages = [{}, HashSubclass[]]
+
+      Julewire.with_execution(type: :request, id: "request-1") do
+        Julewire.context.add(request_id: "request-1")
+        messages.each { Julewire::Karafka.inject!(it) }
+      end
+
+      messages.each do |message|
+        assert_kind_of Hash, message.fetch(:headers)
+        assert message.fetch(:headers).fetch("julewire")
+      end
+    end
+
+    def test_waterdrop_middleware_reports_unsupported_message_shape
+      message = Object.new
+
+      assert_same message, Julewire::Karafka.inject!(message)
+
+      health = Julewire.health.dig(:process_integrations, :karafka)
+
+      assert_equal :degraded, health.fetch(:status)
+      assert_equal :carrier_inject, health.dig(:last_failure, :action)
+      assert_equal :waterdrop_middleware, health.dig(:last_failure, :component)
+      assert_equal "ArgumentError", health.dig(:last_failure, :class)
+    end
+
     def test_waterdrop_middleware_injects_carrier_through_karafka_testing_producer
       with_karafka_producer_middleware_snapshot do |producer|
         configuration = Julewire::Karafka::Configuration.new
@@ -44,7 +75,7 @@ module Julewire
         end
 
         message = @karafka.produced_messages.fetch(0)
-        envelope = Julewire::Core::Propagation::Carrier.extract(message.fetch(:headers))
+        envelope = Julewire::Core::Propagation::Carrier.extract_envelope(message.fetch(:headers))
 
         assert message.fetch(:headers).fetch("julewire")
         assert_equal "request-1", envelope.dig(:context, :request_id)
@@ -62,8 +93,9 @@ module Julewire
     def test_install_helper_can_install_consumer_and_producer
       monitor = FakeMonitor.new
       producer = FakeProducer.new
+      app = fake_karafka_app(monitor)
 
-      result = Julewire::Karafka.install!(monitor: monitor, producer: producer)
+      result = Julewire::Karafka.install!(app: app, producer: producer)
 
       assert_producer_installed(producer)
       assert_same monitor, result.consumer
@@ -83,6 +115,23 @@ module Julewire
       assert_equal 1, producer.middleware.items.size
       assert_equal producer.monitor.subscriptions.uniq, producer.monitor.subscriptions
       assert_nil producer.middleware.items.fetch(0).call(headers: {}).fetch(:headers)["julewire"]
+    end
+
+    def test_waterdrop_installer_uses_configured_carrier_key
+      producer = FakeProducer.new
+      configuration = Julewire::Karafka::Configuration.new
+      configuration.carrier_key = "x-julewire"
+      configuration.producer_events = false
+
+      Julewire::Karafka.install!(consumer: false, producer: producer, configuration: configuration)
+
+      message = { headers: {} }
+      Julewire.context.with(request_id: "request-1") do
+        producer.middleware.items.fetch(0).call(message)
+      end
+
+      assert message.fetch(:headers).fetch("x-julewire")
+      assert_false message.fetch(:headers).key?("julewire")
     end
 
     def test_waterdrop_listener_defaults_to_important_event_profile
@@ -218,6 +267,8 @@ module Julewire
       )
 
       assert_equal :error, record[:severity]
+      assert_equal "error.occurred", record.dig(:neutral, :"messaging.operation.name")
+      assert_equal "send", record.dig(:neutral, :"messaging.operation.type")
       assert_karafka_source_contract(record, event: "waterdrop.error_occurred", logger: "WaterDrop.monitor")
     end
 
@@ -242,13 +293,48 @@ module Julewire
       assert_equal :waterdrop_installer, Julewire.health.dig(:process_integrations, :karafka, :last_failure, :component)
     end
 
+    def test_waterdrop_installer_records_middleware_failure_without_listener_overwrite
+      producer = Object.new
+      def producer.middleware = raise("middleware failed")
+
+      configuration = Julewire::Karafka::Configuration.new
+      configuration.producer_events = false
+
+      assert_same producer,
+                  Julewire::Karafka.install!(consumer: false, producer: producer, configuration: configuration)
+
+      failure = Julewire.health.dig(:process_integrations, :karafka, :last_failure)
+
+      assert_equal :install, failure.fetch(:action)
+      assert_equal :waterdrop_installer, failure.fetch(:component)
+      assert_equal "RuntimeError", failure.fetch(:class)
+    end
+
+    def test_waterdrop_installer_records_monitor_failure_when_listener_enabled
+      producer = Object.new
+      def producer.middleware = FakeMiddleware.new
+      def producer.monitor = raise("monitor failed")
+
+      configuration = Julewire::Karafka::Configuration.new
+      configuration.propagation = false
+
+      assert_same producer,
+                  Julewire::Karafka.install!(consumer: false, producer: producer, configuration: configuration)
+
+      failure = Julewire.health.dig(:process_integrations, :karafka, :last_failure)
+
+      assert_equal :install, failure.fetch(:action)
+      assert_equal :waterdrop_installer, failure.fetch(:component)
+      assert_equal "RuntimeError", failure.fetch(:class)
+    end
+
     def test_waterdrop_installer_respects_enabled_and_feature_toggles
       configuration = Julewire::Karafka::Configuration.new
       producer = FakeProducer.new
 
       configuration.enabled = false
 
-      refute Julewire::Karafka.install!(consumer: false, producer: producer, configuration: configuration)
+      assert_false Julewire::Karafka.install!(consumer: false, producer: producer, configuration: configuration)
 
       configuration.enabled = true
       configuration.propagation = false
@@ -264,6 +350,16 @@ module Julewire
       producer = Object.new
 
       assert_same producer, Julewire::Karafka.install!(consumer: false, producer: producer)
+      assert_nil Julewire.health.dig(:process_integrations, :karafka, :last_failure)
+    end
+
+    def test_waterdrop_installer_ignores_non_prepend_middleware_and_nil_monitor
+      producer = Object.new
+      def producer.middleware = Object.new
+      def producer.monitor = nil
+
+      assert_same producer, Julewire::Karafka.install!(consumer: false, producer: producer)
+      assert_nil Julewire.health.dig(:process_integrations, :karafka, :last_failure)
     end
 
     private

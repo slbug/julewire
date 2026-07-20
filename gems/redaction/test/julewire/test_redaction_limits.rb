@@ -4,13 +4,9 @@ require "test_helper"
 
 module Julewire
   class RedactionLimitsTest < Minitest::Test
-    cover Julewire::Redaction::Processor
-
+    cover "Julewire::Redaction::Processor#call"
+    cover "Julewire::Redaction::Processor#initialize"
     TRUNCATION_KEY = Julewire::Core::Serialization::Serializer::TRUNCATION_METADATA_KEY.to_sym
-
-    def test_redaction_uses_shared_julewire_truncation_marker_spi_contract
-      assert_julewire_truncation_marker_spi_contract
-    end
 
     def test_redaction_bounds_nested_redaction_array_and_string_work
       payload = bounded_payload(
@@ -59,9 +55,9 @@ module Julewire
       result = apply_redaction(Redaction::Processor.new(max_hash_keys: 1), record)
 
       Core::Records::Record::REQUIRED_KEYS.each do |key|
-        assert result.key?(key), "missing #{key}"
+        assert_true result.key?(key), "missing #{key}"
       end
-      refute result.key?(TRUNCATION_KEY)
+      assert_false result.key?(TRUNCATION_KEY)
       assert_equal(
         truncation_marker(["hash_keys"], max_hash_keys: 1).fetch(TRUNCATION_KEY),
         result.dig(:payload, TRUNCATION_KEY)

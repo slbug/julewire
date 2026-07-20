@@ -55,7 +55,7 @@ module Julewire
 
         private
 
-        def after_configuration_change = nil
+        def after_configuration_change; end
       end
     end
   end

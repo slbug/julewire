@@ -3,27 +3,17 @@
 module Julewire
   module Ractor
     module RemotePayload
-      MISSING = Object.new.freeze
-      private_constant :MISSING
-
       class << self
         def extract(payload)
+          validate_hash!(payload)
           {
-            input: input_value(payload),
+            input: hash_value(payload, :input),
             context: hash_value(payload, :context),
             neutral: hash_value(payload, :neutral),
             attributes: hash_value(payload, :attributes),
             carry: hash_value(payload, :carry),
             scope: scope_snapshot(hash_value(payload, :scope))
           }
-        end
-
-        def input_value(payload)
-          value = Core::Integration::Values::Read.hash_value(payload, :input, default: MISSING)
-          return {} if value.equal?(MISSING)
-          return Core::Fields::FieldSet.deep_symbolize_owned_keys(value) if value.is_a?(Hash)
-
-          value
         end
 
         def scope_snapshot(scope_payload)
@@ -37,8 +27,13 @@ module Julewire
         end
 
         def hash_value(hash, key)
-          value = Core::Integration::Values::Read.hash_value(hash, key)
-          value.is_a?(Hash) ? Core::Fields::FieldSet.deep_symbolize_owned_keys(value) : {}
+          validate_hash!(hash.fetch(key))
+        end
+
+        private
+
+        def validate_hash!(value)
+          Core::Integration::Protocol.validate_symbol_hash(value)
         end
       end
     end

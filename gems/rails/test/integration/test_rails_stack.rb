@@ -5,6 +5,11 @@ require_relative "../dummy/config/environment"
 
 module Julewire
   class TestRailsStack < Minitest::Test
+    cover "Julewire::Rails::Configuration#controller_capture?"
+    cover "Julewire::Rails::RequestLifecycle#start_execution!"
+    cover "Julewire::Rails::Railtie.install_subscribers"
+    cover Julewire::Rails::RequestMiddleware
+    cover Julewire::Rails::Logger
     def setup
       super
       ensure_schema!
@@ -60,8 +65,8 @@ module Julewire
       messages = parse_records(output).filter_map { it["message"] }
 
       assert_includes messages, "controller explicit logger"
-      refute messages.any? { it.include?("Processing by ") }, messages.inspect
-      refute messages.any? { |message| message.match?(/Completed \d{3}/) }, messages.inspect
+      assert_false messages.any? { it.include?("Processing by ") }, messages.inspect
+      assert_false messages.any? { |message| message.match?(/Completed \d{3}/) }, messages.inspect
     end
 
     def test_real_rails_stack_captures_json_response_body_by_default
@@ -72,7 +77,7 @@ module Julewire
       summary = summary_record(parse_records(output))
 
       assert_match(/"ok":true/, summary.dig("attributes", "rails", "response_body"))
-      refute summary.dig("attributes", "rails", "response_body_truncated")
+      assert_false summary.dig("attributes", "rails", "response_body_truncated")
       assert_equal "application/json; charset=utf-8", summary.dig("attributes", "rails", "response_content_type")
     end
 
@@ -87,9 +92,9 @@ module Julewire
       summary = summary_record(parse_records(output))
       rails = summary.fetch("attributes").fetch("rails")
 
-      assert rails.dig("response_body_json", "ok")
-      refute rails.key?("response_body")
-      refute rails.fetch("response_body_truncated")
+      assert_true rails.dig("response_body_json", "ok")
+      assert_false rails.key?("response_body")
+      assert_false rails.fetch("response_body_truncated")
       assert_equal "application/json; charset=utf-8", rails.fetch("response_content_type")
     ensure
       settings.response_capture.body = previous if defined?(previous)
@@ -102,7 +107,7 @@ module Julewire
 
       summary = summary_record(parse_records(output))
 
-      refute summary.dig("attributes", "rails").to_h.key?("response_body")
+      assert_false summary.dig("attributes", "rails").to_h.key?("response_body")
       assert_equal "text/html; charset=utf-8", summary.dig("attributes", "rails", "response_content_type")
     end
 
@@ -116,7 +121,7 @@ module Julewire
 
       summary = summary_record(parse_records(output))
 
-      refute summary.dig("attributes", "rails").to_h.key?("response_body")
+      assert_false summary.dig("attributes", "rails").to_h.key?("response_body")
     ensure
       settings.response_capture.body_content_types = previous if defined?(previous)
     end
@@ -151,7 +156,7 @@ module Julewire
       summary = summary_record(records)
 
       assert_rescued_request_error_summary(summary)
-      refute records.any? { it["event"] == "action_dispatch.rendered_exception" }, records.inspect
+      assert_false records.any? { it["event"] == "action_dispatch.rendered_exception" }, records.inspect
       refute_logger_message_includes(records, "No route matches")
     end
 
@@ -184,10 +189,10 @@ module Julewire
       assert_equal "info", summary.fetch("severity")
       assert_equal 200, summary.dig("attributes", "rails", "status")
       assert_equal "closed", summary.dig("attributes", "rails", "completion")
-      refute summary.fetch("attributes").fetch("rails").key?("error_class")
-      refute summary.key?("error")
-      refute records.any? { it["event"] == "rails.error" }, records.inspect
-      refute records.any? { it["event"] == "action_dispatch.rendered_exception" }, records.inspect
+      assert_false summary.fetch("attributes").fetch("rails").key?("error_class")
+      assert_false summary.key?("error")
+      assert_false records.any? { it["event"] == "rails.error" }, records.inspect
+      assert_false records.any? { it["event"] == "action_dispatch.rendered_exception" }, records.inspect
     end
 
     private
@@ -207,7 +212,7 @@ module Julewire
       assert_equal "ActionController::RoutingError", summary.dig("error", "class")
       assert_equal 404, summary.dig("attributes", "rails", "status")
       assert_equal "ActionController::RoutingError", summary.dig("attributes", "rails", "error_class")
-      assert summary.dig("attributes", "rails", "rescue_response")
+      assert_true summary.dig("attributes", "rails", "rescue_response")
       assert_equal "routing_error", summary.dig("attributes", "rails", "rescue_template")
     end
 
@@ -244,21 +249,21 @@ module Julewire
     end
 
     def assert_event(records, event)
-      assert event_record?(records, event), "expected event #{event.inspect}"
+      assert_true event_record?(records, event), "expected event #{event.inspect}"
     end
 
     def refute_event(records, event)
-      refute event_record?(records, event), "expected no event #{event.inspect}"
+      assert_false event_record?(records, event), "expected no event #{event.inspect}"
     end
 
     def assert_logger_message(records, message)
-      assert records.any? { it["event"] == "log" && it["message"] == message },
-             "expected logger message #{message.inspect}"
+      assert_true records.any? { it["event"] == "log" && it["message"] == message },
+                  "expected logger message #{message.inspect}"
     end
 
     def refute_logger_message_includes(records, fragment)
-      refute records.any? { it["event"] == "log" && it["message"].to_s.include?(fragment) },
-             records.inspect
+      assert_false records.any? { it["event"] == "log" && it["message"].to_s.include?(fragment) },
+                   records.inspect
     end
 
     def event_record?(records, event)

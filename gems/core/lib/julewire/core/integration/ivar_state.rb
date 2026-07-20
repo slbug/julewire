@@ -10,18 +10,13 @@ module Julewire
         end
 
         def fetch(owner)
-          return unless owner.respond_to?(:instance_variable_get)
-
           owner.instance_variable_get(@marker)
         rescue StandardError
           nil
         end
 
         def store(owner, value)
-          return value unless owner.respond_to?(:instance_variable_set)
-
           owner.instance_variable_set(@marker, value)
-          value
         rescue StandardError
           value
         end

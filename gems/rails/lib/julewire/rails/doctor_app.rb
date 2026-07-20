@@ -67,8 +67,8 @@ module Julewire
           "Julewire Doctor",
           [
             "<p>Status: <strong>#{escape(report.fetch(:status))}</strong></p>",
-            "<p>Level: <code>#{escape(report.dig(:runtime, :level))}</code></p>",
-            "<p>Pipeline: <strong>#{escape(report.dig(:pipeline, :status))}</strong></p>",
+            "<p>Level: <code>#{escape(report.fetch(:runtime).fetch(:level))}</code></p>",
+            "<p>Pipeline: <strong>#{escape(report.fetch(:pipeline).fetch(:status))}</strong></p>",
             "<h2>Warnings</h2>",
             warning_items.empty? ? "<p>None</p>" : "<ul>#{warning_items}</ul>",
             nav_links(request, ["/tail", "Tail"], ["/doctor.json", "JSON"])
@@ -79,14 +79,15 @@ module Julewire
       def render_tail(request)
         return page("Julewire Tail", "<p>Tail is not attached.</p>") unless @tail
 
+        table = <<~HTML
+          <table><thead><tr><th>Severity</th><th>Event</th><th>Message</th></tr></thead>
+          <tbody data-tail-records data-tail-events-path="#{escape(app_path(request, "/tail/events"))}">
+          #{tail_rows}
+          </tbody></table>
+        HTML
         body = [
           "<p>#{@tail.health.fetch(:size)} / #{@tail.capacity} records</p>",
-          [
-            "<table><thead><tr><th>Severity</th><th>Event</th><th>Message</th></tr></thead>",
-            %(<tbody data-tail-records data-tail-events-path="#{escape(app_path(request, "/tail/events"))}">),
-            tail_rows,
-            "</tbody></table>"
-          ].join,
+          table,
           tail_nav(request),
           tail_script
         ].join
@@ -99,13 +100,11 @@ module Julewire
 
       def tail_row(entry)
         record = entry.record
-        [
-          "<tr data-sequence=\"#{entry.sequence}\">",
-          "<td><code>#{escape(record["severity"])}</code></td>",
-          "<td><code>#{escape(record["event"])}</code></td>",
-          "<td>#{escape(record["message"])}</td>",
+        "<tr data-sequence=\"#{entry.sequence}\">" \
+          "<td><code>#{escape(record["severity"])}</code></td>" \
+          "<td><code>#{escape(record["event"])}</code></td>" \
+          "<td>#{escape(record["message"])}</td>" \
           "</tr>"
-        ].join
       end
 
       def tail_nav(request)
@@ -117,7 +116,7 @@ module Julewire
       end
 
       def tail_entries
-        @tail ? @tail.entries(limit: TAIL_LIMIT) : []
+        @tail.entries(limit: TAIL_LIMIT)
       end
 
       def tail_events(request)
@@ -135,7 +134,7 @@ module Julewire
       def event_cursor(request)
         value = request.get_header("HTTP_LAST_EVENT_ID")
         value = request.params["after"] if value.nil? || value.empty?
-        Integer(value || 0)
+        Integer(value)
       rescue ArgumentError, TypeError
         0
       end
@@ -190,8 +189,9 @@ module Julewire
       end
 
       def app_path(request, path)
-        base = request.script_name.to_s
-        base = "" if base == "/"
+        base = request.script_name
+        return path if base == "/"
+
         "#{base}#{path}"
       end
 
@@ -200,7 +200,7 @@ module Julewire
       end
 
       def link_to(request, path, label)
-        %(<a href="#{escape(app_path(request, path))}">#{escape(label)}</a>)
+        %(<a href="#{escape(app_path(request, path))}">#{label}</a>)
       end
 
       def page(title, body)
@@ -209,7 +209,7 @@ module Julewire
           <html>
           <head>
             <meta charset="utf-8">
-            <title>#{escape(title)}</title>
+            <title>#{title}</title>
             <style>
               body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; color: #171717; }
               a { color: #0b5fff; margin-right: 1rem; }
@@ -218,7 +218,7 @@ module Julewire
             </style>
           </head>
           <body>
-            <h1>#{escape(title)}</h1>
+            <h1>#{title}</h1>
             #{body}
           </body>
           </html>

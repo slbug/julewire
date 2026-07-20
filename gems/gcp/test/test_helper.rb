@@ -1,22 +1,20 @@
 # frozen_string_literal: true
 
-require "julewire/core/testing/coverage"
-Julewire::Core::Testing::Coverage.start!
+require_relative "../../../support/testing/coverage"
+Julewire::TestSupport::Coverage.start!
 
 require "julewire/gcp"
-require "julewire/core/testing"
 
 require "minitest/autorun"
-require "julewire/core/testing/test_reports"
-Julewire::Core::Testing::TestReports.start!
-require "mutant/minitest/coverage"
+require "minitest/strict"
+require_relative "../../../support/testing/test_reports"
+Julewire::TestSupport::TestReports.start!
+require_relative "../../../support/mutant/minitest_coverage"
 require "json"
 require "stringio"
 
 module Minitest
   class Test
-    include Julewire::Core::Testing::Contracts
-
     def setup
       Julewire.reset!
     end

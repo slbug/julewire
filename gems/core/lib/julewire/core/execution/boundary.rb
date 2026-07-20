@@ -74,15 +74,11 @@ module Julewire
 
           EXECUTION_OPTION_DEFAULTS.merge(options).tap do |normalized|
             normalized[:execution] = execution_fields(normalized.delete(:fields))
-            normalized[:attributes] ||= EMPTY_HASH
-            normalized[:neutral] ||= EMPTY_HASH
-            normalized[:labels] ||= EMPTY_HASH
           end
         end
 
         def execution_fields(fields)
-          return {} if fields.nil?
-          raise ArgumentError, "execution fields must be a Hash" unless fields.is_a?(Hash)
+          raise ArgumentError, "execution fields must be a Hash" unless fields.nil? || fields.is_a?(Hash)
 
           fields
         end
@@ -91,9 +87,7 @@ module Julewire
           return unless emit_summary_enabled
 
           @summary_finalizer ||= lambda do |scope|
-            next if suppress_summary_for_non_standard_exception?(scope)
-
-            @emit_summary_record.call(scope)
+            @emit_summary_record.call(scope) unless suppress_summary_for_non_standard_exception?(scope)
           end
         end
 

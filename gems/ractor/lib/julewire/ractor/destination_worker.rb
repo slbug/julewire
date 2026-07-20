@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-# :nocov:
 module Julewire
   module Ractor
     class DestinationWorker
@@ -47,27 +46,24 @@ module Julewire
         @ack_port = ack_port
         loop do
           message = command_port.receive
-          break if close_message?(message)
+          current_command = command(message)
+          break if current_command == :close_worker
 
-          break if dispatch(message) == :close
+          break if dispatch(message, current_command) == :close
         end
       ensure
         close_output
-        ack(:closed)
       end
 
       private
 
-      def close_message?(message)
-        message.is_a?(Hash) && message[:command] == :close_worker
-      end
-
-      def dispatch(message)
-        return unless message.is_a?(Hash)
-
-        case message[:command]
+      def dispatch(message, current_command)
+        case current_command
         when :emit
-          emit(message[:record])
+          emit(
+            message.fetch(:record),
+            parent_degradation_marker: message.fetch(:degradation_marker)
+          )
         when :flush
           reply_to(message, call_output_lifecycle(:flush))
         when :close
@@ -75,51 +71,47 @@ module Julewire
           :close
         when :health
           reply_to(message, health)
+        else
+          raise ArgumentError, "unknown ractor destination command: #{current_command.inspect}"
         end
-      rescue StandardError => e
-        record_failure(e, phase: :dispatch)
-        reply_to(message, false)
       end
 
-      def emit(record)
-        ack(@write_step.call(record) == :accepted ? :accepted : :dropped)
-      rescue StandardError => e
-        record_failure(e, phase: :emit)
-        ack(:dropped)
+      def command(message)
+        Core::Integration::Protocol.validate_symbol_hash(message)
+        message.fetch(:command)
+      end
+
+      def emit(record, parent_degradation_marker:)
+        accepted = @health.recover_if_successful { @write_step.call(record) }
+        ack(accepted ? :accepted : :dropped, degradation_marker: parent_degradation_marker)
       end
 
       def call_output_lifecycle(method_name)
-        return close_lifecycle if method_name == :close
-        return true unless @output.respond_to?(method_name)
+        return close_lifecycle_succeeds? if method_name == :close
 
-        @output.public_send(method_name) != false
+        @health.recover_if_successful do
+          !@output.respond_to?(method_name) || @output.public_send(method_name) != false
+        end
       rescue StandardError => e
         record_failure(e, phase: :output_lifecycle, action: method_name)
         false
       end
 
-      def close_lifecycle
-        return true if output_closed?
+      def close_lifecycle_succeeds?
+        return true if @output.respond_to?(:closed?) && @output.closed?
         return @output.close != false if @close_output && @output.respond_to?(:close)
         return @output.flush != false if @output.respond_to?(:flush)
 
         true
-      rescue StandardError => e
-        record_failure(e, phase: :output_lifecycle, action: :close)
-        false
       end
 
       def close_output
-        return if output_closed?
+        return if @output.respond_to?(:closed?) && @output.closed?
         return unless @close_output && @output.respond_to?(:close)
 
         @output.close
-      rescue StandardError => e
-        record_failure(e, phase: :output_lifecycle, action: :close)
-      end
-
-      def output_closed?
-        @output.respond_to?(:closed?) ? @output.closed? : false
+      rescue StandardError
+        nil
       end
 
       def health
@@ -131,7 +123,7 @@ module Julewire
       end
 
       def record_failure(error, **metadata)
-        @health.record_failure(error, counter: nil, **metadata)
+        @health.record_failure(error, **metadata)
       end
 
       def record_loss(reason, **metadata)
@@ -139,7 +131,7 @@ module Julewire
       end
 
       def record_write_step_failure(error, metadata)
-        record_failure(error, **recordless_metadata(metadata))
+        record_failure(error, **metadata)
       end
 
       def record_write_step_loss(reason, metadata)
@@ -156,15 +148,19 @@ module Julewire
         metadata.except(:record)
       end
 
-      def ack(status)
-        @ack_port.send({ event: :ack, status: status })
-      rescue StandardError
-        nil
+      def ack(status, degradation_marker:)
+        @ack_port.send({ degradation_marker: degradation_marker, event: :ack, status: status })
       end
 
       def reply_to(message, response)
-        reply = message[:reply]
-        reply.send(response) if reply.is_a?(::Ractor::Port)
+        reply = message.fetch(:reply)
+        raise TypeError, "ractor destination reply must be a Ractor::Port" unless reply.is_a?(::Ractor::Port)
+
+        send_reply(reply, response)
+      end
+
+      def send_reply(reply, response)
+        reply.send(response)
       rescue StandardError => e
         record_failure(e, phase: :reply)
       end
@@ -173,4 +169,3 @@ module Julewire
     private_constant :DestinationWorker
   end
 end
-# :nocov:

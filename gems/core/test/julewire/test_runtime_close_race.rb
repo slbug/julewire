@@ -4,6 +4,12 @@ require "test_helper"
 
 module Julewire
   class TestRuntimeCloseRace < Minitest::Test
+    cover "Julewire::Core::Runtime#call_pipeline_lifecycle_on"
+    cover "Julewire::Core::Runtime#close"
+    cover "Julewire::Core::Runtime#close_state"
+    cover "Julewire::Core::Runtime#close_state_resources"
+    cover "Julewire::Core::Runtime#configure"
+
     class BlockingCloseOutput
       attr_reader :closed_count
 
@@ -40,14 +46,14 @@ module Julewire
       context = close_race_context
 
       configure_close_race_start(context)
-      close_thread = Thread.new { Julewire.close(timeout: 5) }
+      close_thread = safe_thread { Julewire.close(timeout: 5) }
 
       assert context.fetch(:handle_ready).pop(timeout: 1)
 
       reconfigure_during_close(context)
       context.fetch(:release_handle) << true
 
-      assert close_thread.value
+      assert safe_thread_value(close_thread)
       assert_equal 1, context.fetch(:old_output).closed_count
       assert_equal 0, context.fetch(:new_output).closed_count
     ensure
@@ -61,10 +67,54 @@ module Julewire
         configure_destination(config, output: output, close_output: true)
       end
 
-      assert Julewire.close(timeout: 1)
-      assert Julewire.close(timeout: 1)
+      assert_true Julewire.close(timeout: 1)
+      assert_true Julewire.close(timeout: 1)
 
       assert_equal 1, output.closed_count
+    end
+
+    def test_concurrent_closes_transfer_pipeline_ownership_once
+      context = close_race_context
+
+      configure_close_race_start(context)
+      close_thread = safe_thread { Julewire.close(timeout: 5) }
+
+      assert context.fetch(:handle_ready).pop(timeout: 1)
+
+      assert_true Julewire.close(timeout: 1)
+
+      context.fetch(:release_handle) << true
+
+      assert safe_thread_value(close_thread)
+      assert_equal 1, context.fetch(:old_output).closed_count
+    ensure
+      context&.fetch(:release_handle)&.push(true)
+      cleanup_thread(close_thread)
+    end
+
+    def test_reset_during_close_does_not_take_the_old_pipeline_twice
+      context = close_race_context
+
+      configure_close_race_start(context)
+      close_thread = safe_thread { Julewire.close(timeout: 5) }
+
+      assert context.fetch(:handle_ready).pop(timeout: 1)
+
+      Julewire.reset!
+
+      health = Julewire.health
+
+      assert_false health.fetch(:closed)
+      assert_equal :unconfigured, health.dig(:pipeline, :status)
+      assert_empty Julewire.config.destinations
+
+      context.fetch(:release_handle) << true
+
+      assert safe_thread_value(close_thread)
+      assert_equal 1, context.fetch(:old_output).closed_count
+    ensure
+      context&.fetch(:release_handle)&.push(true)
+      cleanup_thread(close_thread)
     end
 
     def test_configure_after_close_does_not_close_old_pipeline_again
@@ -74,7 +124,7 @@ module Julewire
         configure_destination(config, output: old_output, close_output: true)
       end
 
-      assert Julewire.close(timeout: 1)
+      assert_true Julewire.close(timeout: 1)
       Julewire.configure do |config|
         configure_destination(config, output: new_output, close_output: true)
       end

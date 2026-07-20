@@ -4,8 +4,7 @@ require "test_helper"
 
 module Julewire
   class TestRactorChildStatsObject < Minitest::Test
-    cover "Julewire::Ractor::ChildStats"
-
+    cover "Julewire::Ractor::ChildStats*"
     def setup
       super
       @stats = child_stats_class.new
@@ -26,7 +25,7 @@ module Julewire
         },
         snapshot.fetch(:counts)
       )
-      refute snapshot.key?(:last_error_class)
+      assert_false snapshot.key?(:last_error_class)
     end
 
     def test_message_and_request_counters
@@ -45,6 +44,12 @@ module Julewire
 
     def test_error_counters_record_last_error_class
       assert_nil @stats.message_dropped(RuntimeError.new("drop"))
+
+      message_snapshot = @stats.to_h
+
+      assert_equal 1, message_snapshot.dig(:counts, :messages_dropped)
+      assert_equal "RuntimeError", message_snapshot.fetch(:last_error_class)
+
       assert_nil @stats.request_failed(ArgumentError.new("fail"))
 
       snapshot = @stats.to_h
@@ -73,7 +78,23 @@ module Julewire
         },
         snapshot.fetch(:counts)
       )
-      refute snapshot.key?(:last_error_class)
+      assert_false snapshot.key?(:last_error_class)
+    end
+
+    def test_counters_are_thread_safe
+      threads = Array.new(8) do
+        safe_thread do
+          250.times { @stats.message_sent }
+          nil
+        rescue StandardError => e
+          e
+        end
+      end
+
+      errors = safe_thread_values(threads).grep(StandardError)
+
+      assert_empty errors
+      assert_equal 2_000, @stats.to_h.dig(:counts, :messages_sent)
     end
 
     private

@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 1.1.0 - 2026-07-20
+
+- Resolve Rails-family event reporters from top-level framework namespaces and
+  safely detach matching log subscribers.
+- Require julewire-core 1.1.0.
+
 ## 1.0.1 - 2026-06-25
 
 - Require julewire-core 1.0.1.

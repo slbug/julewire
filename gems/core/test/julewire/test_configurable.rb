@@ -4,8 +4,16 @@ require "test_helper"
 
 module Julewire
   class TestConfigurable < Minitest::Test
+    cover Julewire::Core::Integration::Configurable
     module Example
       class Configuration
+        attr_accessor :value
+      end
+
+      class ChildConfiguration < Configuration
+      end
+
+      class OtherConfiguration
         attr_accessor :value
       end
 
@@ -22,6 +30,18 @@ module Julewire
       end
 
       assert_equal "configuration class block required", error.message
+    end
+
+    def test_configurable_with_replaces_configuration_class
+      adapter = Module.new { extend Core::Integration::Configurable }
+
+      adapter.configurable_with { Example::Configuration }
+      first = adapter.config
+      adapter.configurable_with { Example::OtherConfiguration }
+      adapter.reset!
+
+      assert_instance_of Example::Configuration, first
+      assert_instance_of Example::OtherConfiguration, adapter.config
     end
 
     def setup
@@ -46,9 +66,20 @@ module Julewire
       configuration = Example::Configuration.new
 
       Example::Adapter.config = configuration
+
+      assert_same configuration, Example::Adapter.config
+
       Example::Adapter.reset!
 
       refute_same configuration, Example::Adapter.config
+    end
+
+    def test_config_assignment_accepts_subclass
+      configuration = Example::ChildConfiguration.new
+
+      Example::Adapter.config = configuration
+
+      assert_same configuration, Example::Adapter.config
     end
 
     def test_config_assignment_rejects_wrong_type

@@ -47,11 +47,22 @@ module Julewire
         remote_emit(:emit_without_level, record, fields, &)
       end
 
+      def emit_integration(record, enforce_level:)
+        command = enforce_level ? :emit : :emit_without_level
+        input = Core::Records::BuildInput.validate_owned(record)
+        notify(command, payload: remote_emit_payload(input))
+      rescue StandardError => e
+        @child_stats.message_dropped(e)
+      end
+
       def remote_emit(command, record, fields, &)
         record = Core.emit_input(record, fields)
         record = Core::Records::LazyEmitInput.call(record, &) if block_given?
-        record = record.to_h if Core::Records::LazyEmitInput.input?(record)
-        notify(command, payload: remote_emit_payload(record))
+        input = Core::Records::BuildInput.normalize_public(record)
+        input = Core::Fields::FieldSet.deep_symbolize_keys(input)
+        notify(command, payload: remote_emit_payload(input))
+      rescue StandardError => e
+        @child_stats.message_dropped(e)
       end
       private :remote_emit
 
@@ -81,22 +92,22 @@ module Julewire
         Core::ContextStore.reset_current!
       end
 
+      def reset_facade! = reset!
+
       def emit_summary_record(scope)
-        notify(:emit_record, payload: Core::Serialization::Serializer.call(summary_record_input(scope)))
+        notify(:emit_record, payload: serialize_remote(summary_record_input(scope)))
+      rescue StandardError => e
+        @child_stats.message_dropped(e)
       end
 
       private
 
       def emit_non_standard_exception_summaries? = @emit_non_standard_exception_summaries
 
-      def summary_finalizer_failure
-        @summary_finalizer_failure ||= ->(_error) {}
-      end
-
       def build_execution_boundary
         Core::Execution::Boundary.new(
           emit_summary_record: ->(scope) { emit_summary_record(scope) },
-          summary_finalizer_failure: summary_finalizer_failure,
+          summary_finalizer_failure: nil,
           emit_non_standard_exception_summaries: -> { emit_non_standard_exception_summaries? }
         )
       end
@@ -108,19 +119,23 @@ module Julewire
       end
 
       def remote_emit_payload(record)
-        {
-          input: Core::Serialization::Serializer.call(record),
-          context: Core::Serialization::Serializer.call(Core::ContextStore.current.context_hash),
-          neutral: Core::Serialization::Serializer.call(Core::ContextStore.current.neutral_hash),
-          attributes: Core::Serialization::Serializer.call(Core::ContextStore.current.attributes_hash),
-          carry: Core::Serialization::Serializer.call(Core::ContextStore.current.carry_hash),
-          scope: Core::Serialization::Serializer.call(scope_payload)
-        }
+        serialize_remote(
+          input: record,
+          context: Core::ContextStore.current.context_hash,
+          neutral: Core::ContextStore.current.neutral_hash,
+          attributes: Core::ContextStore.current.attributes_hash,
+          carry: Core::ContextStore.current.carry_hash,
+          scope: scope_payload
+        )
+      end
+
+      def serialize_remote(value)
+        RemoteSerializer.call(value)
       end
 
       def scope_payload
         scope = Core::ContextStore.current.current_scope_or_snapshot
-        return {} unless scope
+        return empty_scope_payload unless scope
 
         {
           execution: scope.execution_hash,
@@ -131,31 +146,28 @@ module Julewire
         }
       end
 
+      def empty_scope_payload
+        { execution: {}, neutral: {}, attributes: {}, carry: {}, labels: {} }
+      end
+
       def notify(command, payload:)
         @request_mutex.synchronize do
           @port.send({ command: command, payload: payload })
         end
         @child_stats.message_sent
-        nil
-      rescue StandardError => e
-        @child_stats.message_dropped(e)
-        nil
       end
 
       def request(command, timeout:)
         reply = ::Ractor::Port.new
-        waiting_for_reply = false
         @request_mutex.synchronize do
           @port.send({ command: command, payload: { timeout: timeout }, reply: reply })
         end
         @child_stats.request_sent
-        waiting_for_reply = true
         wait_for_reply(reply, timeout)
       rescue StandardError => e
         @child_stats.request_failed(e)
-        nil
       ensure
-        close_reply(reply) if reply && !waiting_for_reply
+        close_reply(reply)
       end
 
       def effective_timeout(timeout)
@@ -163,20 +175,17 @@ module Julewire
       end
 
       def wait_for_reply(reply, timeout)
-        timeout_token = @timeout_scheduler.schedule(reply, timeout: timeout) if timeout
-        response = reply.receive
+        response = if timeout.nil?
+                     reply.receive
+                   else
+                     @timeout_scheduler.with_timeout(reply, timeout: timeout) { reply.receive }
+                   end
 
         if response.equal?(REQUEST_TIMEOUT)
           @child_stats.request_timed_out
-          nil
         else
           response
         end
-      rescue StandardError
-        nil
-      ensure
-        @timeout_scheduler.cancel(timeout_token)
-        close_reply(reply)
       end
 
       def close_reply(reply)

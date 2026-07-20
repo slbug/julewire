@@ -5,15 +5,86 @@ require "json"
 require "stringio"
 
 module Julewire
+  class TestCoreNormalizeName < Minitest::Test
+    cover "Julewire::Core.normalize_name"
+
+    def test_accepts_strings_and_symbols
+      symbol = :queue_name
+
+      assert_equal :queue_name, Julewire::Core.normalize_name("queue_name")
+      assert_same symbol, Julewire::Core.normalize_name(symbol)
+    end
+
+    def test_rejects_empty_values_with_named_message
+      string_error = assert_raises(ArgumentError) { Julewire::Core.normalize_name("", name: "runtime") }
+      symbol_error = assert_raises(ArgumentError) { Julewire::Core.normalize_name(:"", name: "runtime") }
+      type_error = assert_raises(ArgumentError) { Julewire::Core.normalize_name(Object.new, name: "runtime") }
+
+      assert_equal "runtime must not be empty", string_error.message
+      assert_equal "runtime must not be empty", symbol_error.message
+      assert_equal "runtime must be a String or Symbol", type_error.message
+    end
+
+    def test_uses_name_as_the_default_error_label
+      string_error = assert_raises(ArgumentError) { Julewire::Core.normalize_name("") }
+      symbol_error = assert_raises(ArgumentError) { Julewire::Core.normalize_name(:"") }
+      type_error = assert_raises(ArgumentError) { Julewire::Core.normalize_name(Object.new) }
+
+      assert_equal "name must not be empty", string_error.message
+      assert_equal "name must not be empty", symbol_error.message
+      assert_equal "name must be a String or Symbol", type_error.message
+    end
+  end
+
   class TestCore < Minitest::Test
-    def test_that_it_has_a_version_number
-      assert_match(/\A\d+\.\d+\.\d+\z/, ::Julewire::Core::VERSION)
+    cover "Julewire::Core.sentinel"
+    cover Julewire::Core::Sentinel
+    cover Julewire::Core::FacadePrivateMethods
+    cover "Julewire::Core::Runtime#carry"
+    cover "Julewire::Core::Runtime#config"
+    cover "Julewire::Core::Runtime#context"
+    cover "Julewire::Core::Runtime#runtime_state"
+    cover "Julewire::Core::Runtime#summary"
+    cover "Julewire::Core::FacadeMethods#after_fork!"
+    cover "Julewire::Core::FacadeMethods#attributes"
+    cover "Julewire::Core::FacadeMethods#carry"
+    cover "Julewire::Core::FacadeMethods#close"
+    cover "Julewire::Core::FacadeMethods#config"
+    cover "Julewire::Core::FacadeMethods#configure"
+    cover "Julewire::Core::FacadeMethods#context"
+    cover "Julewire::Core::FacadeMethods#current_execution"
+    cover "Julewire::Core::FacadeMethods#debug"
+    cover "Julewire::Core::FacadeMethods#dev!"
+    cover "Julewire::Core::FacadeMethods#doctor"
+    cover "Julewire::Core::FacadeMethods#emit"
+    cover "Julewire::Core::FacadeMethods#error"
+    cover "Julewire::Core::FacadeMethods#fatal"
+    cover "Julewire::Core::FacadeMethods#fiber"
+    cover "Julewire::Core::FacadeMethods#flush"
+    cover "Julewire::Core::FacadeMethods#health"
+    cover "Julewire::Core::FacadeMethods#info"
+    cover "Julewire::Core::FacadeMethods#labels"
+    cover "Julewire::Core::FacadeMethods#measure"
+    cover "Julewire::Core::FacadeMethods#measure_start"
+    cover "Julewire::Core::FacadeMethods#observe_self!"
+    cover "Julewire::Core::FacadeMethods#punk!"
+    cover "Julewire::Core::FacadeMethods#reset!"
+    cover "Julewire::Core::FacadeMethods#runtime"
+    cover "Julewire::Core::FacadeMethods#start_execution"
+    cover "Julewire::Core::FacadeMethods#summary"
+    cover "Julewire::Core::FacadeMethods#tail"
+    cover "Julewire::Core::FacadeMethods#thread"
+    cover "Julewire::Core::FacadeMethods#unknown"
+    cover "Julewire::Core::FacadeMethods#warn"
+    cover "Julewire::Core::FacadeMethods#with_execution"
+    def self.emit_severity_messages
+      %i[debug info warn error fatal].each { |severity| Julewire.public_send(severity, "#{severity} message") }
     end
 
     def test_zeitwerk_eager_loads_core_tree
-      Julewire::Core.__send__(:loader).eager_load(force: true)
+      Zeitwerk::Loader.eager_load_all
 
-      assert Julewire::Core.const_defined?(:VERSION)
+      assert_true Julewire::Core.const_defined?(:VERSION)
     end
 
     def test_core_singleton_methods_are_internal
@@ -22,10 +93,9 @@ module Julewire
       assert_respond_to Julewire, :runtime
       assert_respond_to Julewire, :flush
       assert_respond_to Julewire, :close
-      assert(%i[health after_fork!].all? { Julewire.respond_to?(it) })
+      assert_true(%i[health after_fork!].all? { Julewire.respond_to?(it) })
       refute_respond_to Julewire, :reopen
       refute_respond_to Julewire, :install_at_exit_close
-      assert Julewire::Core.singleton_class.private_method_defined?(:loader)
       refute_respond_to Julewire::Core, :loader
       refute_respond_to Julewire, :pipeline
       refute_respond_to Julewire, :pipeline=
@@ -47,15 +117,70 @@ module Julewire
       refute_includes audit_output.string, "default"
     end
 
+    def test_named_runtime_fields_only_emit_does_not_invent_empty_message
+      audit_output = StringIO.new
+      Julewire.runtime(:audit).configure { configure_destination(it, output: audit_output) }
+
+      Julewire.runtime(:audit).emit(event: "audit.event", payload: { count: 1 })
+
+      record = JSON.parse(audit_output.string)
+
+      assert_equal "audit.event", record.fetch("event")
+      assert_equal 1, record.dig("payload", "count")
+      assert_false record.key?("message")
+    end
+
     def test_named_runtime_is_memoized
       assert_same Julewire.runtime(:audit), Julewire.runtime("audit")
       assert_same Julewire::Core::RuntimeLocator.current, Julewire.runtime
       assert_same Julewire::Core::RuntimeLocator.current, Julewire.runtime(:default)
     end
 
-    def test_named_runtime_rejects_bad_names
-      assert_raises(ArgumentError) { Julewire.runtime(Object.new) }
-      assert_raises(ArgumentError) { Julewire.runtime("") }
+    def test_named_facade_helpers_route_to_named_runtime
+      Julewire.runtime(:audit).configure { |config| config.level = :error }
+      tail = Julewire.tail(:audit, capacity: 2)
+
+      Julewire.runtime(:audit).emit(message: "audit", event: "audit.event", severity: :error)
+      Julewire.emit(message: "default", event: "default.event")
+
+      assert_equal :error, Julewire.doctor(:audit).dig(:runtime, :level)
+      assert_equal(["audit.event"], tail.records.map { it.fetch("event") })
+    end
+
+    def test_facade_delegates_labels_and_after_fork_to_runtime
+      labels = Object.new
+      runtime = Object.new
+      runtime.define_singleton_method(:labels) { labels }
+      runtime.define_singleton_method(:after_fork!) { :forked }
+      facade = facade_with_runtime(runtime)
+
+      assert_same labels, facade.labels
+      assert_equal :forked, facade.after_fork!
+    end
+
+    def test_tail_facade_uses_default_and_named_runtime_arguments
+      runtime_names = []
+      attached_runtimes = []
+      attached_options = []
+      facade = Object.new
+      facade.extend Julewire::Core::FacadeMethods
+      facade.define_singleton_method(:runtime) do |name = :default|
+        runtime_names << name
+        :runtime
+      end
+
+      with_overridden_singleton_method(Julewire::Core::Diagnostics::Tail, :attach!, proc { |runtime, **options|
+        attached_runtimes << runtime
+        attached_options << options
+        :tail
+      }) do
+        assert_equal :tail, facade.tail(capacity: 2)
+        assert_equal :tail, facade.tail(:audit, capacity: 2)
+      end
+
+      assert_equal %i[runtime runtime], attached_runtimes
+      assert_equal [{ capacity: 2 }, { capacity: 2 }], attached_options
+      assert_equal %i[default audit], runtime_names
     end
 
     def test_named_sentinels_are_frozen_and_readable
@@ -64,18 +189,13 @@ module Julewire
       assert_predicate sentinel, :frozen?
       assert_equal :example, sentinel.name
       assert_equal "#<Julewire::Core::Sentinel example>", sentinel.inspect
+      assert_equal "#<Julewire::Core::Sentinel example>", sentinel.to_s
     end
 
-    def test_named_runtime_requires_core_runtime
-      current = Object.new
+    def test_named_sentinels_reject_empty_names_with_sentinel_wording
+      error = assert_raises(ArgumentError) { Julewire::Core.sentinel("") }
 
-      Julewire::Core::RuntimeLocator.current = current
-
-      assert_same current, Julewire.runtime
-      error = assert_raises(Julewire::Core::Error) { Julewire.runtime(:audit) }
-      assert_match "named Julewire runtimes", error.message
-    ensure
-      Julewire::Core::RuntimeLocator.current = Julewire::Core::Runtime.new
+      assert_equal "sentinel must not be empty", error.message
     end
 
     def test_public_extension_aliases_point_to_core_contract_classes
@@ -87,10 +207,10 @@ module Julewire
       assert_same Julewire::Core::Serialization::TextEncoder, Julewire::TextEncoder
       assert_same Julewire::Core::Serialization::Serializer, Julewire::Serializer
       assert_same Julewire::Core::Processing::Match, Julewire::Match
-      refute Julewire.const_defined?(:CLI, false)
-      refute Julewire.const_defined?(:Destination, false)
-      refute Julewire.const_defined?(:MetaObserver, false)
-      refute Julewire.const_defined?(:Severity, false)
+      assert_false Julewire.const_defined?(:CLI, false)
+      assert_false Julewire.const_defined?(:Destination, false)
+      assert_false Julewire.const_defined?(:MetaObserver, false)
+      assert_false Julewire.const_defined?(:Severity, false)
     end
 
     def test_capture_julewire_records_collects_normalized_records
@@ -100,6 +220,139 @@ module Julewire
 
       assert_equal "hello", records.first[:message]
       assert_equal 1, records.first.dig(:payload, :count)
+    end
+
+    def test_emit_with_fields_only_does_not_synthesize_empty_message
+      records = capture_julewire_records do
+        Julewire.emit(event: "fields.only", payload: { count: 1 })
+      end
+
+      record = records.fetch(0)
+
+      assert_equal "fields.only", record.fetch(:event)
+      assert_nil record.fetch(:message)
+      assert_equal 1, record.dig(:payload, :count)
+    end
+
+    def test_severity_helpers_without_record_emit_severity_only
+      records = capture_julewire_records do
+        %i[debug info warn error fatal].each { Julewire.public_send(it) }
+      end
+
+      assert_equal(%i[debug info warn error fatal], records.map { it.fetch(:severity) })
+      assert_true(records.all? { it.fetch(:message).nil? })
+    end
+
+    def test_severity_helpers_with_scalar_records_preserve_message_and_severity
+      records = capture_julewire_records do
+        self.class.emit_severity_messages
+      end
+
+      assert_equal(%i[debug info warn error fatal], records.map { it.fetch(:severity) })
+      assert_equal(
+        ["debug message", "info message", "warn message", "error message", "fatal message"],
+        records.map { it.fetch(:message) }
+      )
+    end
+
+    def test_severity_helpers_forward_lazy_blocks
+      records = capture_julewire_records do
+        %i[debug info warn error fatal].each do |severity|
+          Julewire.public_send(severity) { { message: "lazy #{severity}", payload: { source: severity } } }
+        end
+      end
+
+      assert_equal(%i[debug info warn error fatal], records.map { it.fetch(:severity) })
+      assert_equal(
+        ["lazy debug", "lazy info", "lazy warn", "lazy error", "lazy fatal"],
+        records.map { it.fetch(:message) }
+      )
+      assert_equal(%i[debug info warn error fatal], records.map { it.dig(:payload, :source) })
+    end
+
+    def test_severity_helpers_do_not_report_invalid_severities
+      Julewire.configure { configure_destination(it, output: StringIO.new) }
+      before = Julewire.health.dig(:counts, :invalid_record_severities)
+
+      self.class.emit_severity_messages
+
+      assert_equal before, Julewire.health.dig(:counts, :invalid_record_severities)
+    end
+
+    def test_start_execution_forwards_execution_fields
+      handle = Julewire.start_execution(
+        type: :request,
+        fields: { request_id: "req-1" },
+        emit_summary: false
+      )
+
+      assert_equal "req-1", handle.snapshot.execution_hash.fetch(:request_id)
+    ensure
+      handle&.finish
+    end
+
+    def test_punk_without_chaos_does_not_construct_chaos_output
+      output = StringIO.new
+
+      with_overridden_singleton_method(
+        Julewire::Core::Destinations::ChaosOutput,
+        :new,
+        proc { raise "chaos output should not be built" }
+      ) do
+        Julewire.punk!(output: output, chaos: false)
+      end
+
+      Julewire.info("punk")
+
+      assert_includes output.string, "punk"
+    end
+
+    def test_punk_banner_writes_default_banner_when_requested
+      output = StringIO.new
+
+      Julewire.punk!(output: output, chaos: false, banner: true)
+
+      assert_equal "!!JULEWIRE PUNK!! chaos containment armed\n", output.string.lines.first
+    end
+
+    def test_punk_true_chaos_uses_default_chaos_options
+      output = StringIO.new
+
+      Julewire.punk!(output: output, chaos: true)
+
+      health = Julewire.health.dig(:pipeline, :destinations, :default)
+
+      assert_equal :ok, health.fetch(:status)
+    end
+
+    def test_punk_chaos_accepts_hash_subclass_options
+      chaos_options = Class.new(Hash).new.merge!(rate: 2)
+
+      error = assert_raises(ArgumentError) do
+        Julewire.punk!(output: StringIO.new, chaos: chaos_options, banner: false)
+      end
+
+      assert_equal "chaos rate must be a finite Numeric between 0 and 1", error.message
+    end
+
+    def test_tail_facade_uses_core_tail_not_public_alias
+      poison = Module.new do
+        class << self
+          def attach!(*)
+            raise "public Tail alias should not be used"
+          end
+        end
+      end
+      original = Julewire.const_get(:Tail, false)
+      Julewire.__send__(:remove_const, :Tail)
+      Julewire.const_set(:Tail, poison)
+
+      tail = Julewire.tail(capacity: 1)
+
+      assert_instance_of Julewire::Core::Diagnostics::Tail, tail
+    ensure
+      Julewire.__send__(:remove_const, :Tail) if Julewire.const_defined?(:Tail, false)
+      Julewire.const_set(:Tail, original) if original
     end
 
     def test_context_add_is_included_on_point_logs_and_summary_logs
@@ -152,7 +405,7 @@ module Julewire
       outputs = Array.new(2) { StringIO.new }
 
       threads = outputs.each_with_index.map do |output, index|
-        Thread.new do
+        safe_thread do
           ready << true
           start.pop
           Julewire.configure do |config|
@@ -162,9 +415,9 @@ module Julewire
         end
       end
 
-      2.times { ready.pop }
+      2.times { safe_queue_pop(ready) }
       2.times { start << true }
-      threads.each(&:value)
+      safe_thread_values(threads)
 
       Julewire.emit(message: "configured")
 
@@ -191,17 +444,6 @@ module Julewire
       after = Julewire.health
 
       assert_operator after.fetch(:generation), :>, before.fetch(:generation)
-    end
-
-    def test_summary_reports_active_inside_execution_scope
-      refute_predicate Julewire, :current_execution?
-
-      Julewire.with_execution(type: :request, emit_summary: false) do
-        assert_predicate Julewire.summary, :active?
-        assert_predicate Julewire, :current_execution?
-      end
-
-      refute_predicate Julewire, :current_execution?
     end
 
     def test_execution_scope_finishes_with_error_on_exception
@@ -254,400 +496,14 @@ module Julewire
       assert_equal "[Circular]", record.dig("payload", "cyclic", "self")
       assert_equal "value", record.dig("payload", "symbol")
     end
-  end
-
-  class TestConfigureGuard < Minitest::Test
-    def test_julewire_fiber_created_inside_configure_does_not_keep_stale_guard
-      output = StringIO.new
-      fiber = nil
-
-      Julewire.configure do |config|
-        configure_destination(config, output: output)
-        fiber = Julewire.fiber { Julewire.emit(message: "fiber") }
-      end
-
-      fiber.resume
-
-      assert_equal "fiber", JSON.parse(output.string).fetch("message")
-    end
-
-    def test_julewire_thread_created_inside_configure_does_not_keep_stale_guard
-      output = StringIO.new
-      ready = Queue.new
-      thread = nil
-
-      Julewire.configure do |config|
-        configure_destination(config, output: output)
-        thread = Julewire.thread do
-          ready.pop
-          Julewire.emit(message: "thread")
-        end
-      end
-
-      ready << true
-      thread.value
-
-      assert_equal "thread", JSON.parse(output.string).fetch("message")
-    end
-
-    def test_configure_guard_reaches_nested_fibers
-      Julewire.configure do |_config|
-        Fiber.new do
-          error = assert_raises(Julewire::Core::Error) do
-            Julewire.emit(message: "nested")
-          end
-
-          assert_match "cannot be called from inside Julewire.configure", error.message
-        end.resume
-      end
-    end
-
-    def test_raw_thread_spawned_inside_configure_can_emit_after_configure_finishes
-      output = StringIO.new
-      release = Queue.new
-      result = Queue.new
-      thread = nil
-
-      Julewire.configure do |config|
-        configure_destination(config, output: output)
-        thread = Thread.new do
-          release.pop
-          Julewire.emit(message: "raw-thread")
-          result << :ok
-        rescue StandardError => e
-          result << e
-        end
-      end
-
-      release << true
-      emitted = result.pop
-
-      assert_equal :ok, emitted
-      assert_equal "raw-thread", JSON.parse(output.string).fetch("message")
-    ensure
-      cleanup_thread(thread)
-    end
-  end
-
-  class TestCoreRuntimeHooks < Minitest::Test
-    class FailingOutput
-      def write(_value)
-        raise "write failed"
-      end
-    end
-
-    class ForkAwareOutput
-      attr_reader :after_fork_count
-
-      def initialize
-        @after_fork_count = 0
-      end
-
-      def write(value)
-        value.bytesize
-      end
-
-      def after_fork!
-        @after_fork_count += 1
-      end
-    end
-
-    class ForkFailingOutput
-      def write(value)
-        value.bytesize
-      end
-
-      def after_fork!
-        raise "output fork failed"
-      end
-    end
-
-    def test_after_fork_resets_process_local_warning_state
-      Julewire.configure do |config|
-        configure_destination(config, output: FailingOutput.new)
-      end
-
-      Julewire.emit(severity: Object.new, message: "bad severity")
-
-      before = Julewire.health
-
-      assert_operator before.dig(:counts, :invalid_record_severities), :>, 0
-
-      Julewire.after_fork!
-
-      after = Julewire.health
-
-      assert_equal 0, after.dig(:counts, :invalid_record_severities)
-    end
-
-    def test_after_fork_resets_runtime_pipeline_and_destination_health
-      Julewire.configure do |config|
-        configure_destination(config, output: FailingOutput.new)
-      end
-
-      Julewire.emit(message: "lost")
-      before = Julewire.health
-
-      assert_equal :degraded, before.fetch(:status)
-      assert_operator before.dig(:pipeline, :counts, :entered), :>, 0
-      assert_operator before.dig(:pipeline, :destinations, :default, :counts, :output_error), :>, 0
-
-      Julewire.after_fork!
-      after = Julewire.health
-
-      assert_equal :ok, after.fetch(:status)
-      assert_equal 0, after.dig(:counts, :runtime_failures)
-      assert_equal 0, after.dig(:pipeline, :counts, :entered)
-      assert_equal 0, after.dig(:pipeline, :destinations, :default, :counts, :output_error)
-      assert_nil after.dig(:pipeline, :destinations, :default, :last_loss)
-    end
-
-    def test_after_fork_forwards_to_outputs_and_registered_integration_hooks
-      output = ForkAwareOutput.new
-      hook_calls = 0
-      Julewire::Core::Integration::Lifecycle.register_after_fork(:test_core, component: :test) { hook_calls += 1 }
-      Julewire.configure do |config|
-        configure_destination(config, output: output)
-      end
-
-      Julewire.after_fork!
-
-      assert_equal 1, output.after_fork_count
-      assert_equal 1, hook_calls
-    ensure
-      Julewire::Core::Integration::ForkHooks.reset!
-    end
-
-    def test_after_fork_forwards_to_named_runtime_outputs_once
-      default_output = ForkAwareOutput.new
-      audit_output = ForkAwareOutput.new
-      hook_calls = 0
-      Julewire::Core::Integration::Lifecycle.register_after_fork(:test_core, component: :test) { hook_calls += 1 }
-
-      Julewire.configure { configure_destination(it, output: default_output) }
-      Julewire.runtime(:audit).configure { configure_destination(it, output: audit_output) }
-
-      Julewire.after_fork!
-
-      assert_equal 1, default_output.after_fork_count
-      assert_equal 1, audit_output.after_fork_count
-      assert_equal 1, hook_calls
-    ensure
-      Julewire::Core::Integration::ForkHooks.reset!
-    end
-
-    def test_after_fork_keeps_multiple_components_for_one_integration
-      calls = []
-      Julewire::Core::Integration::Lifecycle.register_after_fork(:test_core, component: :first) { calls << :first }
-      Julewire::Core::Integration::Lifecycle.register_after_fork(:test_core, component: :second) { calls << :second }
-
-      Julewire.after_fork!
-
-      assert_equal %i[first second], calls
-    ensure
-      Julewire::Core::Integration::ForkHooks.reset!
-    end
-
-    def test_after_fork_contains_output_lifecycle_failures
-      Julewire.configure do |config|
-        configure_destination(config, output: ForkFailingOutput.new)
-      end
-
-      Julewire.after_fork!
-
-      health = destination_health
-
-      assert_equal :degraded, health.fetch(:status)
-      assert_equal :after_fork, health.dig(:last_failure, :action)
-      assert_equal :output_lifecycle, health.dig(:last_failure, :phase)
-    end
-
-    def test_after_fork_contains_registered_integration_hook_failures
-      Julewire::Core::Integration::Lifecycle.register_after_fork(:test_core, component: :after_fork) do
-        raise "hook failed"
-      end
-
-      Julewire.after_fork!
-
-      health = Julewire.health.fetch(:process_integrations).fetch(:test_core)
-
-      assert_equal :degraded, health.fetch(:status)
-      assert_equal :after_fork, health.dig(:last_failure, :action)
-      assert_equal :after_fork, health.dig(:last_failure, :component)
-    ensure
-      Julewire::Core::Integration::ForkHooks.reset!
-    end
-
-    def test_after_fork_registration_rejects_programmer_errors
-      assert_raises_message(ArgumentError, /block required/) do
-        Julewire::Core::Integration::Lifecycle.register_after_fork(:test_core, component: :after_fork)
-      end
-
-      assert_raises_message(ArgumentError, /integration name/) do
-        Julewire::Core::Integration::Lifecycle.register_after_fork("", component: :after_fork) { nil }
-      end
-    ensure
-      Julewire::Core::Integration::ForkHooks.reset!
-    end
-
-    def test_after_fork_rebuilds_process_local_storage_mutexes
-      local_storage_mutex = Julewire::Core::LocalStorage.instance_variable_get(:@runtime_mutex)
-      integration_store = Julewire::Core::Diagnostics::ProcessIntegrationHealth.instance_variable_get(:@store)
-
-      Julewire.after_fork!
-
-      refute_same local_storage_mutex, Julewire::Core::LocalStorage.instance_variable_get(:@runtime_mutex)
-      refute_same integration_store, Julewire::Core::Diagnostics::ProcessIntegrationHealth.instance_variable_get(:@store)
-    end
-
-    def test_runtime_locator_uses_local_storage_in_main_ractor
-      skip "Ractor-local storage is not available" unless ractor_storage_available?
-
-      runtime = Julewire::Core::Runtime.new
-
-      Julewire::Core::RuntimeLocator.current = runtime
-
-      assert_same runtime, Julewire::Core::RuntimeLocator.current
-      assert_same runtime, Julewire::Core::LocalStorage.runtime
-    end
-
-    def test_runtime_level_emit_failures_notify_failure_callback
-      failures = Queue.new
-      configure_runtime_failure_capture(failures)
-      previous_runtime_failures = Julewire.health.dig(:counts, :runtime_failures)
-      pipeline = active_pipeline
-
-      with_overridden_singleton_method(pipeline, :emit, proc { |_record, **| raise "escaped pipeline failure" }) do
-        assert_nil Julewire.emit(message: "lost")
-      end
-
-      assert_equal "escaped pipeline failure", failures.pop.message
-      assert_runtime_failure_recorded(previous_runtime_failures)
-      assert_runtime_status_recovers_after_successful_emit
-    end
-
-    def test_runtime_level_emit_failure_callback_failures_are_counted
-      Julewire.configure do |config|
-        config.on_failure = ->(_error, _metadata) { raise "callback failed" }
-      end
-      pipeline = active_pipeline
-      previous_counts = Julewire.health.fetch(:counts)
-
-      with_overridden_singleton_method(pipeline, :emit, proc { |_record, **| raise "escaped pipeline failure" }) do
-        assert_nil Julewire.emit(message: "lost")
-      end
-
-      health = Julewire.health
-
-      actual_delta = health.dig(:counts, :runtime_callback_failures) -
-                     previous_counts.fetch(:runtime_callback_failures)
-      runtime_failure_delta = health.dig(:counts, :runtime_failures) -
-                              previous_counts.fetch(:runtime_failures)
-
-      assert_equal 1, actual_delta
-      assert_equal 1, runtime_failure_delta
-    end
-
-    def test_runtime_level_emit_failures_use_callback_from_emit_state
-      original_failures = Queue.new
-      replacement_failures = Queue.new
-      Julewire.configure do |config|
-        config.on_failure = ->(error, _metadata) { original_failures << error }
-      end
-      pipeline = active_pipeline
-
-      with_overridden_singleton_method(
-        pipeline,
-        :emit,
-        proc do |_record, **|
-          Julewire.configure do |config|
-            config.on_failure = ->(error, _metadata) { replacement_failures << error }
-          end
-          raise "snapshot pipeline failure"
-        end
-      ) do
-        assert_nil Julewire.emit(message: "lost")
-      end
-
-      assert_equal "snapshot pipeline failure", original_failures.pop.message
-      assert_empty nonblocking_queue_values(replacement_failures)
-    end
 
     private
 
-    def ractor_storage_available?
-      defined?(Ractor) &&
-        Ractor.respond_to?(:store_if_absent) &&
-        Ractor.respond_to?(:[])
-    end
-
-    def active_pipeline
-      Julewire::Core::RuntimeLocator.current.__send__(:runtime_state).pipeline
-    end
-
-    def configure_runtime_failure_capture(failures)
-      Julewire.configure do |config|
-        config.destinations.use(:default, output: StringIO.new)
-        config.on_failure = ->(error, _metadata) { failures.push(error) }
+    def facade_with_runtime(runtime)
+      Object.new.tap do |facade|
+        facade.extend Julewire::Core::FacadeMethods
+        facade.define_singleton_method(:runtime) { runtime }
       end
-    end
-
-    def assert_runtime_failure_recorded(previous_runtime_failures)
-      assert_equal 1, Julewire.health.dig(:counts, :runtime_failures) - previous_runtime_failures
-      assert_equal "RuntimeError", Julewire.health.dig(:last_failure, :class)
-      assert_equal :runtime, Julewire.health.dig(:last_failure, :phase)
-    end
-
-    def assert_runtime_status_recovers_after_successful_emit
-      Julewire.emit(message: "recovered")
-
-      assert_equal :ok, Julewire.health.fetch(:status)
-      assert_equal "RuntimeError", Julewire.health.dig(:last_failure, :class)
-    end
-  end
-
-  class TestCoreBlockContracts < Minitest::Test
-    def test_public_block_apis_require_blocks
-      assert_block_required { Julewire.with_execution(type: :job) }
-      assert_block_required { Julewire.context.with(account_id: "acct-1") }
-      assert_block_required { Julewire::Core::Propagation.restore({}) }
-    end
-
-    def assert_block_required(&)
-      error = assert_raises(ArgumentError, &)
-
-      assert_equal "block required", error.message
-    end
-  end
-
-  class TestCoreConfigurationBoundaries < Minitest::Test
-    def test_configure_rejects_runtime_calls_from_inside_configure
-      old_config = Julewire.config
-
-      assert_configure_rejects_runtime_call("Julewire.emit") { Julewire.emit(message: "not during configure") }
-
-      assert_same old_config, Julewire.config
-    end
-
-    def test_configure_rejects_flush_from_inside_configure
-      assert_configure_rejects_runtime_call("Julewire.flush") { Julewire.flush }
-    end
-
-    def test_configure_rejects_after_fork_from_inside_configure
-      assert_configure_rejects_runtime_call("Julewire.after_fork!") { Julewire.after_fork! }
-    end
-
-    private
-
-    def assert_configure_rejects_runtime_call(message)
-      error = assert_raises(Julewire::Core::Error) do
-        Julewire.configure do |config|
-          config.level = :info
-          yield
-        end
-      end
-
-      assert_match message, error.message
     end
   end
 end

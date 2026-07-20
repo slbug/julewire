@@ -5,7 +5,6 @@ require "test_helper"
 module Julewire
   class TestRactorBridgeStats < Minitest::Test
     cover Julewire::Ractor::Bridge::Stats
-
     def setup
       super
       stats.after_fork!
@@ -18,12 +17,12 @@ module Julewire
 
       health = stats.health
 
-      assert health.fetch(:experimental)
+      assert_true health.fetch(:experimental)
       assert_equal 1, health.fetch(:active_threads)
       assert_equal 2, health.fetch(:started_threads)
       assert_equal 1, health.fetch(:stopped_threads)
       assert_equal 0, health.fetch(:failure_count)
-      refute health.key?(:last_error_class)
+      assert_false health.key?(:last_error_class)
     end
 
     def test_bridge_stopped_does_not_make_active_thread_count_negative
@@ -44,6 +43,7 @@ module Julewire
       assert_equal 0, health.fetch(:active_threads)
       assert_equal 1, health.fetch(:failure_count)
       assert_equal "RuntimeError", health.fetch(:last_error_class)
+      assert_equal "boom", health.fetch(:last_error_message)
     end
 
     def test_message_and_failure_counters
@@ -56,6 +56,7 @@ module Julewire
       assert_equal 2, health.fetch(:messages)
       assert_equal 1, health.fetch(:failure_count)
       assert_equal "ArgumentError", health.fetch(:last_error_class)
+      assert_equal "bad", health.fetch(:last_error_message)
     end
 
     def test_reset_clears_history_but_preserves_active_thread_count
@@ -72,7 +73,8 @@ module Julewire
       assert_equal 0, health.fetch(:failure_count)
       assert_equal 0, health.fetch(:started_threads)
       assert_equal 0, health.fetch(:stopped_threads)
-      refute health.key?(:last_error_class)
+      assert_false health.key?(:last_error_class)
+      assert_false health.key?(:last_error_message)
     end
 
     def test_after_fork_clears_active_threads_and_history
@@ -89,7 +91,8 @@ module Julewire
       assert_equal 0, health.fetch(:failure_count)
       assert_equal 0, health.fetch(:started_threads)
       assert_equal 0, health.fetch(:stopped_threads)
-      refute health.key?(:last_error_class)
+      assert_false health.key?(:last_error_class)
+      assert_false health.key?(:last_error_message)
     end
 
     private

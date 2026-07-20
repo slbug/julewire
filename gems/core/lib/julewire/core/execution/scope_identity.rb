@@ -55,15 +55,7 @@ module Julewire
         end
 
         def freeze_identity_value(value)
-          case value
-          when String
-            copy = value.frozen? ? value : value.dup
-            copy.freeze
-          when Symbol, Numeric, true, false, nil
-            value
-          else
-            Serialization::ValueCopy.call(value, freeze_values: true)
-          end
+          Serialization::ValueCopy.call(value, freeze_values: true)
         end
       end
     end

@@ -6,6 +6,14 @@ require "stringio"
 
 module Julewire
   class TestOutputAndLevel < Minitest::Test
+    cover Julewire::Core::Processing::LevelThreshold
+    cover "Julewire::Core::Processing::Pipeline#build_threshold"
+    cover "Julewire::Core::Processing::Pipeline#emit_input_with_guard"
+    cover "Julewire::Core::Processing::Pipeline#emit_with_level_check"
+    cover "Julewire::Core::Runtime#configure"
+    cover "Julewire::Core::Runtime#emit"
+    cover "Julewire::Core::Runtime#emit_with_level_check"
+    cover "Julewire::Core::Runtime#runtime_counts_snapshot"
     def test_config_level_drops_records_below_threshold
       output = StringIO.new
 
@@ -39,6 +47,21 @@ module Julewire
       assert_empty output.string
     end
 
+    def test_string_keyed_raw_severity_drops_before_context_lookup
+      output = StringIO.new
+
+      Julewire.configure do |config|
+        config.level = :info
+        configure_destination(config, output: output)
+      end
+
+      with_context_store_probe do
+        assert_nil Julewire.emit("severity" => "debug", "message" => "debug")
+      end
+
+      assert_empty output.string
+    end
+
     def test_below_threshold_implicit_info_drops_before_context_lookup
       output = StringIO.new
 
@@ -62,7 +85,7 @@ module Julewire
         configure_destination(config, output: output)
       end
 
-      Julewire.emit(severity: :WARN, message: "warn")
+      Julewire.emit(severity: "WARN", message: "warn")
       Julewire.emit(severity: "ERROR", message: "error")
 
       record = JSON.parse(output.string)

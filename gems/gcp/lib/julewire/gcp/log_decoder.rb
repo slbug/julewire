@@ -36,7 +36,7 @@ module Julewire
         def record_base(payload, julewire)
           {
             timestamp: payload["time"] || payload["timestamp"],
-            severity: Julewire::Core::Records::Severity.normalize(payload["severity"] || :info),
+            severity: Core::Records::Severity.normalize(payload["severity"] || :info),
             kind: RecordDecoder.kind(julewire["kind"] || :point),
             event: julewire["event"],
             message: payload["message"],
@@ -46,7 +46,7 @@ module Julewire
         end
 
         def record_sections(payload, julewire)
-          RecordDecoder.sections(payload) do |section, _source|
+          RecordDecoder.sections(nil) do |section, _source|
             gcp_section_value(section, payload, julewire)
           end
         end

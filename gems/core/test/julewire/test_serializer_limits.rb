@@ -5,9 +5,12 @@ require "bigdecimal"
 
 module Julewire
   class TestSerializerLimits < Minitest::Test
-    cover "Julewire::Core::Serialization::BoundedTraversal"
     cover Julewire::Core::Serialization::Serializer
-
+    cover "Julewire::Core::Serialization::BoundedTraversal#walk_value"
+    cover "Julewire::Core::Serialization::BoundedTraversal#walk_full_hash"
+    cover "Julewire::Core::Serialization::BoundedTraversal#walk_full_array"
+    cover "Julewire::Core::Serialization::BoundedTraversal#walk_compact_hash"
+    cover "Julewire::Core::Serialization::BoundedTraversal#walk_compact_array"
     METADATA_KEY = Julewire::Core::Serialization::Serializer::TRUNCATION_METADATA_KEY
 
     def test_serializer_truncates_long_strings_and_marks_parent_field
@@ -17,6 +20,28 @@ module Julewire
       assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
                                         fields: ["message"],
                                         max_string_bytes: 3
+    end
+
+    def test_serializer_repairs_truncated_string_boundary_encoding
+      serialized = Julewire::Core::Serialization::Serializer.call({ message: "aéz" }, max_string_bytes: 2)
+      message = serialized.fetch("message")
+
+      assert_equal "a?...[Truncated]", message
+      assert_predicate message, :valid_encoding?
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["message"],
+                                        max_string_bytes: 2
+    end
+
+    def test_serializer_clears_truncation_state_after_top_level_truncation
+      serializer = Julewire::Core::Serialization::Serializer.new(max_string_bytes: 3)
+
+      assert_equal "abc...[Truncated]", serializer.serialize("abcdef")
+
+      clean = serializer.serialize(message: "ok")
+
+      assert_equal({ "message" => "ok" }, clean)
+      refute_includes clean, METADATA_KEY
     end
 
     def test_serializer_truncates_arrays_and_marks_parent_field
@@ -32,6 +57,20 @@ module Julewire
                                         max_array_items: 2
     end
 
+    def test_serializer_full_array_accumulates_child_and_array_limit_truncation
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        %w[abcdef ghijkl unvisited],
+        max_array_items: 2,
+        max_string_bytes: 3
+      )
+
+      assert_equal ["abc...[Truncated]", "ghi...[Truncated]"], serialized.first(2)
+      assert_string_truncation_metadata serialized.fetch(2).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_array_items: 2,
+                                        max_string_bytes: 3
+    end
+
     def test_serializer_truncates_hash_keys_and_marks_hash
       serialized = Julewire::Core::Serialization::Serializer.call({ a: 1, b: 2, c: 3 }, max_hash_keys: 2)
 
@@ -41,6 +80,51 @@ module Julewire
       assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
                                         fields: ["hash_keys"],
                                         max_hash_keys: 2
+    end
+
+    def test_serializer_full_hash_records_truncated_keys
+      max_key_bytes = Julewire::Core::Serialization::Serializer::MAX_KEY_BYTES
+      long_key = "#{"k" * max_key_bytes}x"
+      truncated_key = "#{"k" * max_key_bytes}...[Truncated]"
+
+      serialized = Julewire::Core::Serialization::Serializer.call({ long_key => "ok" })
+
+      assert_equal "ok", serialized.fetch(truncated_key)
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: [truncated_key]
+    end
+
+    def test_serializer_full_hash_accumulates_child_and_hash_limit_truncation
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        {
+          message: "abcdef",
+          second: 2,
+          third: 3
+        },
+        max_hash_keys: 2,
+        max_string_bytes: 3
+      )
+
+      assert_equal "abc...[Truncated]", serialized.fetch("message")
+      assert_equal 2, serialized.fetch("second")
+      refute_includes serialized, "third"
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: %w[message hash_keys],
+                                        max_hash_keys: 2,
+                                        max_string_bytes: 3
+    end
+
+    def test_serializer_full_hash_accumulates_multiple_child_truncations
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { first: "abcdef", second: "ghijkl" },
+        max_string_bytes: 3
+      )
+
+      assert_equal "abc...[Truncated]", serialized.fetch("first")
+      assert_equal "ghi...[Truncated]", serialized.fetch("second")
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: %w[first second],
+                                        max_string_bytes: 3
     end
 
     def test_serializer_can_compact_empty_values_during_serialization
@@ -77,6 +161,21 @@ module Julewire
       assert_equal({ "keep" => "ok", "array" => ["ok"] }, serialized)
     end
 
+    def test_serializer_compact_empty_skips_raw_empty_array_items_before_walking
+      broken_empty_hash = Class.new(Hash) do
+        def each
+          raise "should not walk omitted empty hash"
+        end
+      end.new
+
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        [nil, broken_empty_hash, [], "ok"],
+        compact_empty: true
+      )
+
+      assert_equal ["ok"], serialized
+    end
+
     def test_serializer_compact_empty_preserves_default_serializer_shape_when_disabled
       serialized = Julewire::Core::Serialization::Serializer.call({ nil_value: nil, empty_hash: {}, empty_array: [] })
 
@@ -102,6 +201,119 @@ module Julewire
       assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
                                         fields: ["hash_keys"],
                                         max_hash_keys: 3
+    end
+
+    def test_serializer_compact_hash_records_truncated_keys
+      max_key_bytes = Julewire::Core::Serialization::Serializer::MAX_KEY_BYTES
+      long_key = "#{"k" * max_key_bytes}x"
+      truncated_key = "#{"k" * max_key_bytes}...[Truncated]"
+
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { long_key => "ok" },
+        compact_empty: true
+      )
+
+      assert_equal "ok", serialized.fetch(truncated_key)
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: [truncated_key]
+    end
+
+    def test_serializer_compact_hash_accumulates_child_and_hash_limit_truncation
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        {
+          message: "abcdef",
+          second: 2,
+          third: 3
+        },
+        compact_empty: true,
+        max_hash_keys: 2,
+        max_string_bytes: 3
+      )
+
+      assert_equal "abc...[Truncated]", serialized.fetch("message")
+      assert_equal 2, serialized.fetch("second")
+      refute_includes serialized, "third"
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: %w[message hash_keys],
+                                        max_hash_keys: 2,
+                                        max_string_bytes: 3
+    end
+
+    def test_serializer_compact_hash_records_child_truncation_without_hash_limit
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { message: "abcdef", status: "ok" },
+        compact_empty: true,
+        max_string_bytes: 3
+      )
+
+      assert_equal "abc...[Truncated]", serialized.fetch("message")
+      assert_equal "ok", serialized.fetch("status")
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["message"],
+                                        max_string_bytes: 3
+    end
+
+    def test_serializer_compact_hash_spends_nested_depth
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { parent: { child: { value: 1 } } },
+        compact_empty: true,
+        max_depth: 2
+      )
+
+      assert_equal "[MaxDepth]", serialized.dig("parent", "child")
+      assert_string_truncation_metadata serialized.fetch("parent").fetch(METADATA_KEY),
+                                        fields: ["child"],
+                                        max_depth: 2
+    end
+
+    def test_serializer_compact_array_spends_nested_depth
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        [[1]],
+        compact_empty: true,
+        max_depth: 1
+      )
+
+      assert_equal "[MaxDepth]", serialized.first
+      assert_string_truncation_metadata serialized.fetch(1).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_depth: 1
+    end
+
+    def test_serializer_compact_array_spends_parent_depth
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { items: [[1]] },
+        compact_empty: true,
+        max_depth: 2
+      )
+
+      assert_equal "[MaxDepth]", serialized.dig("items", 0)
+      assert_string_truncation_metadata serialized.fetch("items").fetch(1).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_depth: 2
+    end
+
+    def test_serializer_compact_array_does_not_overspend_depth
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        [[1]],
+        compact_empty: true,
+        max_depth: 3
+      )
+
+      assert_equal [[1]], serialized
+    end
+
+    def test_serializer_compact_array_records_child_truncation
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        %w[abcdef ok],
+        compact_empty: true,
+        max_string_bytes: 3
+      )
+
+      assert_equal "abc...[Truncated]", serialized.fetch(0)
+      assert_equal "ok", serialized.fetch(1)
+      assert_string_truncation_metadata serialized.fetch(2).fetch(METADATA_KEY),
+                                        fields: ["array_items"],
+                                        max_string_bytes: 3
     end
 
     def test_serializer_marks_max_depth_hash_pruning
@@ -154,6 +366,48 @@ module Julewire
       assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
                                         fields: ["items"],
                                         max_array_items: 2
+    end
+
+    def test_serializer_clean_non_string_scalar_clears_previous_truncation_state
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { long: "abcdef", count: 1 },
+        max_string_bytes: 3
+      )
+
+      assert_equal 1, serialized.fetch("count")
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["long"],
+                                        max_string_bytes: 3
+    end
+
+    def test_serializer_clean_object_marker_clears_previous_truncation_state
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { long: "abcdef", marker: Object.new },
+        max_string_bytes: 3
+      )
+
+      assert_equal "[Object: Object]", serialized.fetch("marker")
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["long"],
+                                        max_string_bytes: 3
+    end
+
+    def test_serializer_unserializable_marker_clears_previous_truncation_state
+      broken = Class.new(Hash) do
+        def each
+          raise "broken hash"
+        end
+      end.new
+
+      serialized = Julewire::Core::Serialization::Serializer.call(
+        { long: "abcdef", broken: broken },
+        max_string_bytes: 3
+      )
+
+      assert_equal "[Unserializable: RuntimeError]", serialized.fetch("broken")
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["long"],
+                                        max_string_bytes: 3
     end
 
     def test_serializer_truncates_on_byte_boundary_without_invalid_utf8
@@ -257,7 +511,6 @@ module Julewire
 
   class TestSerializerConstructorAndExceptionLimits < Minitest::Test
     cover Julewire::Core::Serialization::Serializer
-
     METADATA_KEY = Julewire::Core::Serialization::Serializer::TRUNCATION_METADATA_KEY
 
     def test_serializer_instance_preserves_default_shape_when_compaction_not_requested
@@ -276,9 +529,20 @@ module Julewire
 
       assert_equal "[MaxDepth]", serialized.fetch("class")
       assert_equal "[MaxDepth]", serialized.fetch("message")
-      assert metadata.fetch("truncated")
+      assert_true metadata.fetch("truncated")
       assert_equal %w[class message], metadata.fetch("truncated_fields")
       assert_equal 2, metadata.dig("limits", "max_depth")
+    end
+
+    def test_nested_exception_shape_spends_parent_depth
+      error = RuntimeError.new("boom")
+
+      serialized = Julewire::Core::Serialization::Serializer.call({ error: error }, max_depth: 2)
+
+      assert_equal "[MaxDepth]", serialized.fetch("error")
+      assert_string_truncation_metadata serialized.fetch(METADATA_KEY),
+                                        fields: ["error"],
+                                        max_depth: 2
     end
   end
 end

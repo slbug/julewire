@@ -4,15 +4,15 @@ require "test_helper"
 
 module Julewire
   class TestRecordDraft < Minitest::Test
-    cover Julewire::Core::Execution::Lineage
-    cover Julewire::Core::Serialization::ValueCopy
+    cover Julewire::Core::Records::Draft
+    cover Julewire::Core::Records::Record
+    cover "Julewire::Core::Records::Draft::Builder*"
 
     def test_record_draft_allows_direct_mutation_before_final_immutable_record
       draft = Julewire::Core::Records::Draft.build(
         { payload: { "token" => "secret" } },
         context: {},
-        scope: nil,
-        freeze_sections: false
+        scope: nil
       )
 
       draft[:payload][:token] = "[FILTERED]"
@@ -25,6 +25,78 @@ module Julewire
       assert_equal :warn, record.fetch(:severity)
       assert_equal({ token: "[FILTERED]", processed: true }, record.fetch(:payload))
       assert_predicate record.fetch(:payload), :frozen?
+    end
+
+    def test_record_draft_build_accepts_default_empty_input
+      draft = Julewire::Core::Records::Draft.build(context: {}, scope: nil)
+
+      assert_predicate draft.fetch(:timestamp), :utc?
+      assert_predicate draft.fetch(:timestamp), :frozen?
+
+      record = draft.to_record
+
+      assert_equal "log", record.fetch(:event)
+      assert_equal :point, record.fetch(:kind)
+      assert_empty record.fetch(:payload)
+    end
+
+    def test_record_draft_copies_owned_event_into_mutable_state
+      event = +"created"
+      draft = Julewire::Core::Records::Draft.build_pipeline_owned(
+        { event: event },
+        context: {},
+        scope: nil,
+        input_owned: true
+      )
+
+      assert_equal "created", draft.fetch(:event)
+      refute_predicate draft.fetch(:event), :frozen?
+      refute_same event, draft.fetch(:event)
+
+      draft.fetch(:event).replace("updated")
+
+      assert_equal "created", event
+    end
+
+    def test_record_draft_enumerates_owned_record_data
+      draft = draft_with_payload(count: 1)
+      keys = []
+
+      pairs = draft.map { |key, value| [key, value] }
+      draft.each_key { keys << it }
+
+      assert_includes pairs, [:payload, { count: 1 }]
+      assert_includes keys, :payload
+      assert_includes draft.each.to_h.fetch(:payload), :count
+      assert_includes draft.each_key.to_a, :payload
+    end
+
+    def test_record_draft_accepts_normalized_summary_kind
+      record = Julewire::Core::Records::Draft.build({ kind: :summary }, context: {}, scope: nil).to_record
+
+      assert_equal :summary, record.fetch(:kind)
+    end
+
+    def test_record_draft_accepts_string_summary_kind
+      record = Julewire::Core::Records::Draft.build({ kind: "summary" }, context: {}, scope: nil).to_record
+
+      assert_equal :summary, record.fetch(:kind)
+    end
+
+    def test_record_draft_rejects_unsupported_input_kind
+      error = assert_raises(ArgumentError) do
+        Julewire::Core::Records::Draft.build({ kind: Object.new }, context: {}, scope: nil)
+      end
+
+      assert_match(/\Aunsupported record kind: #<Object:/, error.message)
+    end
+
+    def test_record_draft_rejects_unsupported_string_kind_with_inspected_value
+      error = assert_raises(ArgumentError) do
+        Julewire::Core::Records::Draft.build({ kind: "event" }, context: {}, scope: nil)
+      end
+
+      assert_equal 'unsupported record kind: "event"', error.message
     end
 
     def test_record_draft_defers_direct_mutation_validation_until_record_boundary
@@ -46,13 +118,66 @@ module Julewire
     end
 
     def test_record_draft_can_be_built_from_immutable_record_without_sharing_sections
-      record = Julewire::Core::Records::Draft.build({ payload: { count: 1 } }, context: {}, scope: nil).to_record
+      record = record_with_count_payload
 
-      draft = Julewire::Core::Records::Draft.from_record(record, freeze_sections: false)
+      draft = Julewire::Core::Records::Draft.from_record(record)
       draft[:payload] = { count: 2 }
 
       assert_equal({ count: 1 }, record.fetch(:payload))
       assert_equal({ count: 2 }, draft.fetch(:payload))
+    end
+
+    def test_record_draft_from_record_provides_a_mutable_owned_copy
+      record = record_with_count_payload
+
+      draft = Julewire::Core::Records::Draft.from_record(record)
+
+      refute_predicate draft.fetch(:payload), :frozen?
+      draft.fetch(:payload)[:count] = 2
+
+      assert_equal 1, record.dig(:payload, :count)
+      assert_equal 2, draft.dig(:payload, :count)
+    end
+
+    def test_record_draft_from_record_requires_real_record_instance
+      record = record_with_count_payload
+      recordish = Object.new
+      recordish.define_singleton_method(:to_h) { record.to_h }
+      recordish.define_singleton_method(:lineage) { record.lineage }
+
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Draft.from_record(recordish)
+      end
+
+      assert_equal "expected Julewire::Record", error.message
+    end
+
+    def test_record_draft_from_record_preserves_record_lineage
+      record = record_with_count_payload
+
+      draft = Julewire::Core::Records::Draft.from_record(record)
+
+      assert_same record.lineage, draft.lineage
+    end
+
+    def test_record_draft_non_execution_assignment_preserves_lineage_cache
+      lineage = Julewire::Core::Execution::Lineage.from_execution_hash({ type: "job", id: "job-1" })
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record, lineage: lineage)
+
+      draft[:payload] = { count: 1 }
+
+      assert_same lineage, draft.lineage
+    end
+
+    def test_record_draft_transform_field_yields_current_value
+      draft = draft_with_payload(count: 1)
+
+      draft.transform_field!(:payload) do |payload|
+        assert_equal({ count: 1 }, payload)
+        payload.merge(processed: true)
+      end
+
+      assert_equal({ count: 1, processed: true }, draft.fetch(:payload))
     end
 
     def test_record_draft_builds_attributes_section
@@ -69,6 +194,79 @@ module Julewire
 
       assert_equal "GET", record.dig(:attributes, :"my_app.request_method")
       assert_equal "HomeController", record.dig(:attributes, :web, :controller)
+    end
+
+    def test_record_draft_build_forwards_public_record_fields
+      timestamp = Time.utc(2026, 7, 4, 12, 30, 0)
+      event = Object.new
+      event.define_singleton_method(:to_s) { "custom.event" }
+      payload = Class.new(Hash)[attempt: 2]
+      metrics = Class.new(Hash)["duration_ms" => 12.5]
+
+      draft = Julewire::Core::Records::Draft.build(
+        {
+          timestamp: timestamp,
+          severity: :warn,
+          kind: :summary,
+          event: event,
+          message: "done",
+          logger: "app.logger",
+          source: "worker",
+          payload: payload,
+          metrics: metrics,
+          error: nil
+        },
+        context: { request_id: "request-1" },
+        carry: { trace_id: "trace-1" },
+        neutral: { "job.name" => "ImportJob" },
+        attributes: { account: { id: "acct-1" } },
+        static_labels: { service: "worker" },
+        scope: nil
+      )
+      record = draft.to_record
+
+      assert_equal timestamp, record.fetch(:timestamp)
+      assert_predicate record.fetch(:timestamp), :frozen?
+      refute_predicate timestamp, :frozen?
+      assert_equal :warn, record.fetch(:severity)
+      assert_equal :summary, record.fetch(:kind)
+      assert_equal "custom.event", record.fetch(:event)
+      assert_equal "done", record.fetch(:message)
+      assert_equal "app.logger", record.fetch(:logger)
+      assert_equal "worker", record.fetch(:source)
+      assert_equal({ attempt: 2 }, record.fetch(:payload))
+      assert_equal({ duration_ms: 12.5 }, record.fetch(:metrics))
+      assert_nil record.fetch(:error)
+      assert_equal "request-1", record.dig(:context, :request_id)
+      assert_equal "trace-1", record.dig(:carry, :trace_id)
+      assert_equal "ImportJob", record.dig(:neutral, :"job.name")
+      assert_equal "acct-1", record.dig(:attributes, :account, :id)
+      assert_equal "worker", record.dig(:labels, :service)
+    end
+
+    def test_record_draft_build_does_not_report_omitted_severity
+      reported = []
+
+      draft = Julewire::Core::Records::Draft.build(
+        {},
+        context: {},
+        scope: nil,
+        invalid_severity_reporter: ->(value) { reported << value }
+      )
+
+      assert_equal :info, draft.fetch(:severity)
+      assert_empty reported
+    end
+
+    def test_record_draft_wraps_scalar_payload_and_metrics
+      record = Julewire::Core::Records::Draft.build(
+        { payload: false, metrics: 0 },
+        context: {},
+        scope: nil
+      ).to_record
+
+      assert_equal({ value: false }, record.fetch(:payload))
+      assert_equal({ value: 0 }, record.fetch(:metrics))
     end
 
     def test_record_draft_copies_scope_execution_without_explicit_execution_input
@@ -98,6 +296,80 @@ module Julewire
       assert_equal "index", record.dig(:attributes, :web, :action)
     end
 
+    def test_record_draft_build_pipeline_owned_keeps_owned_base_sections_with_input_override
+      base_neutral = { "job.name": "Worker" }.freeze
+      base_carry = { trace_id: "trace-1" }.freeze
+      record = Julewire::Core::Records::Draft.build_pipeline_owned(
+        { neutral: { "job.name": "Importer" }, message: "done" },
+        context: {},
+        carry: base_carry,
+        neutral: base_neutral,
+        scope: nil
+      ).to_record
+
+      assert_equal "Importer", record.dig(:neutral, :"job.name")
+      assert_equal "trace-1", record.dig(:carry, :trace_id)
+    end
+
+    def test_record_draft_treats_nil_base_sections_as_empty
+      record = Julewire::Core::Records::Draft.build(
+        {
+          attributes: { account: { id: "acct-1" } },
+          carry: { trace: { id: "trace-1" } },
+          context: { request_id: "request-1" },
+          neutral: { http: { method: "GET" } }
+        },
+        attributes: nil,
+        carry: nil,
+        context: nil,
+        neutral: nil,
+        scope: nil
+      ).to_record
+
+      assert_equal "acct-1", record.dig(:attributes, :account, :id)
+      assert_equal "trace-1", record.dig(:carry, :trace, :id)
+      assert_equal "request-1", record.dig(:context, :request_id)
+      assert_equal "GET", record.dig(:neutral, :http, :method)
+    end
+
+    def test_record_draft_static_labels_are_optional_and_preserved
+      unlabeled = Julewire::Core::Records::Draft.build({}, context: {}, scope: nil, static_labels: nil).to_record
+      labeled = Julewire::Core::Records::Draft.build(
+        {},
+        context: {},
+        scope: nil,
+        static_labels: { "service" => "checkout" }
+      ).to_record
+
+      assert_empty unlabeled.fetch(:labels)
+      assert_equal "checkout", labeled.dig(:labels, :service)
+    end
+
+    def test_record_draft_context_merge_replaces_nested_hashes_and_keeps_base_immutable
+      base = { account: { id: "acct-1", role: "admin" } }
+
+      draft = Julewire::Core::Records::Draft.build(
+        { context: { account: { id: "acct-2" }, depth: "context-depth" } },
+        context: base,
+        scope: nil
+      )
+
+      assert_equal({ account: { id: "acct-2" }, depth: "context-depth" }, draft.fetch(:context))
+      assert_equal({ account: { id: "acct-1", role: "admin" } }, base)
+      refute_predicate draft.fetch(:context), :frozen?
+    end
+
+    def test_record_draft_base_empty_execution_is_cleaned_and_mutable
+      draft = Julewire::Core::Records::Draft.build(
+        { execution: { type: "job", id: "job-1", depth: 9, root: { id: "root" } } },
+        context: {},
+        scope: nil
+      )
+
+      assert_equal({ type: "job", id: "job-1" }, draft.fetch(:execution))
+      refute_predicate draft.fetch(:execution), :frozen?
+    end
+
     def test_record_draft_transforms_whole_data
       draft = draft_with_payload
 
@@ -116,6 +388,21 @@ module Julewire
       assert_nil draft.fetch(:payload)
     end
 
+    def test_record_draft_validate_returns_self_for_valid_current_data
+      draft = draft_with_payload
+
+      assert_same draft, draft.validate!
+    end
+
+    def test_record_draft_validate_rejects_invalid_current_data
+      draft = draft_with_payload
+
+      draft[:kind] = :bad
+      error = assert_raises(TypeError) { draft.validate! }
+
+      assert_equal "record kind must be :point or :summary", error.message
+    end
+
     def test_record_draft_allows_temporary_non_hash_transform_until_record_boundary
       draft = draft_with_payload
 
@@ -125,23 +412,11 @@ module Julewire
       assert_equal "record must be a normalized Hash", error.message
     end
 
-    def test_record_draft_sections_are_read_only_by_default
-      draft = draft_with_context_and_payload
-
-      assert_raises(FrozenError) { draft[:payload][:tags] << "second" }
-      assert_raises(FrozenError) { draft[:context][:account][:id] = "changed" }
-
-      draft[:payload] = { tags: ["second"] }
-
-      assert_equal ["second"], draft.dig(:payload, :tags)
-    end
-
-    def test_mutable_record_draft_keeps_sections_mutable_until_record_boundary
+    def test_record_draft_keeps_sections_mutable_until_record_boundary
       draft = Julewire::Core::Records::Draft.build(
         { payload: { tags: ["first"] } },
         context: {},
-        scope: nil,
-        freeze_sections: false
+        scope: nil
       )
 
       draft[:payload][:tags] << "second"
@@ -155,23 +430,22 @@ module Julewire
       assert_predicate record.fetch(:payload), :frozen?
     end
 
-    def test_mutable_record_draft_can_merge_missing_optional_sections
-      draft = Julewire::Core::Records::Draft.build({}, context: {}, scope: nil, freeze_sections: false)
+    def test_record_draft_can_merge_missing_optional_sections
+      draft = Julewire::Core::Records::Draft.build({}, context: {}, scope: nil)
 
       draft[:metrics] = { duration_ms: 12.3 }
 
       assert_equal({ duration_ms: 12.3 }, draft.fetch(:metrics))
     end
 
-    def test_mutable_record_draft_does_not_share_context_or_carry_inputs
+    def test_record_draft_does_not_share_context_or_carry_inputs
       context = { account: { id: "acct-1" } }
       carry = { trace: { id: "trace-1" } }
       draft = Julewire::Core::Records::Draft.build(
         {},
         context: context,
         carry: carry,
-        scope: nil,
-        freeze_sections: false
+        scope: nil
       )
 
       draft[:context][:account][:id] = "mutated"
@@ -183,27 +457,22 @@ module Julewire
       assert_equal "trace-1", carry.dig(:trace, :id)
     end
 
-    def test_immutable_record_freezes_owned_draft_sections_in_place
+    def test_immutable_record_freezes_finalized_draft_sections
       draft = Julewire::Core::Records::Draft.build(
         { payload: { body: "x" * 4_096 } },
         context: { account: { id: "acct-1" } },
         scope: nil
       )
-      draft_context = draft[:context]
-      draft_payload = draft[:payload]
-
       record = draft.to_record
 
-      assert_same draft_context, record[:context]
-      assert_equal draft_context, record[:context]
-      assert_same draft_payload, record[:payload]
-      assert_equal draft_payload, record[:payload]
       assert_predicate record[:context], :frozen?
       assert_predicate record[:payload], :frozen?
+      assert_predicate record.dig(:context, :account), :frozen?
+      assert_predicate record.dig(:payload, :body), :frozen?
     end
 
     def test_to_record_is_idempotent_after_freezing_draft_data
-      draft = Julewire::Core::Records::Draft.build({ payload: { count: 1 } }, context: {}, scope: nil)
+      draft = draft_with_payload(count: 1)
 
       first = draft.to_record
       second = draft.to_record
@@ -226,8 +495,8 @@ module Julewire
         scope: nil
       )
 
-      refute draft[:execution].key?(:ancestors)
-      refute draft[:execution].key?(:ancestors_truncated)
+      assert_false draft[:execution].key?(:ancestors)
+      assert_false draft[:execution].key?(:ancestors_truncated)
       assert_equal [{ type: "request", id: "request-1" }], draft.lineage.ancestors
       assert_predicate draft.lineage, :truncated?
     end
@@ -246,8 +515,31 @@ module Julewire
 
       record = draft.to_record
 
-      refute record[:execution].key?(:ancestors)
+      assert_false record[:execution].key?(:ancestors)
       assert_equal [{ type: "request", id: "request-1" }], record.lineage.ancestors
+    end
+
+    def test_record_draft_allows_invalid_execution_mutation_until_record_boundary
+      draft = Julewire::Core::Records::Draft.build(
+        {
+          execution: {
+            type: "job",
+            id: "job-1",
+            ancestors: [{ type: "request", id: "request-1" }]
+          }
+        },
+        context: {},
+        scope: nil
+      )
+
+      draft[:execution] = "invalid"
+
+      assert_equal "invalid", draft[:execution]
+      assert_empty draft.lineage.ancestors
+
+      error = assert_raises(TypeError) { draft.to_record }
+
+      assert_equal "record execution must be a Hash", error.message
     end
 
     def test_transform_record_rebuilds_lineage_for_execution_changes
@@ -267,22 +559,18 @@ module Julewire
 
       record = draft.to_record
 
-      refute record[:execution].key?(:ancestors)
+      assert_false record[:execution].key?(:ancestors)
       assert_equal [{ type: "request", id: "request-1" }], record.lineage.ancestors
     end
 
     private
 
-    def draft_with_payload(payload = { token: "secret" })
-      Julewire::Core::Records::Draft.build({ payload: payload }, context: {}, scope: nil)
+    def record_with_count_payload
+      draft_with_payload(count: 1).to_record
     end
 
-    def draft_with_context_and_payload
-      Julewire::Core::Records::Draft.build(
-        { payload: { tags: ["first"] } },
-        context: { account: { id: "acct-1" } },
-        scope: nil
-      )
+    def draft_with_payload(payload = { token: "secret" })
+      Julewire::Core::Records::Draft.build({ payload: payload }, context: {}, scope: nil)
     end
   end
 end

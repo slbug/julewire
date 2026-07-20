@@ -29,7 +29,7 @@ module Julewire
         end
 
         def each
-          return enum_for(:each) unless block_given?
+          return enum_for unless block_given?
 
           @record.each do |key, value|
             next if INTERNAL_KEYS.include?(key)
@@ -41,7 +41,7 @@ module Julewire
         private
 
         def output_value(key, value)
-          return self.class.public_execution(value) if key == :execution && value.is_a?(Hash)
+          return self.class.public_execution(value) if key == :execution
 
           value
         end

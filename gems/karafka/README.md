@@ -18,6 +18,9 @@ class KarafkaApp < Karafka::App
 end
 ```
 
+Consumer installation is explicit: pass `monitor:` or `app:` so Julewire binds to
+the intended Karafka monitor.
+
 Message processing:
 
 ```ruby

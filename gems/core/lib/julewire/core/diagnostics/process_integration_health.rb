@@ -14,11 +14,6 @@ module Julewire
           def health = @store.health
 
           def reset! = @store.reset!
-
-          def after_fork!
-            @store = IntegrationHealthStore.new
-            nil
-          end
         end
       end
     end

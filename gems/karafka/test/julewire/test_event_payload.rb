@@ -4,9 +4,8 @@ require "test_helper"
 
 module Julewire
   class TestKarafkaEventPayload < Minitest::Test
-    include JulewireCapture
-
     cover Julewire::Karafka::EventPayload
+    include JulewireCapture
 
     BadHash = KarafkaTestSupport::BadHash
     FakeEvent = KarafkaTestSupport::FakeEvent
@@ -64,8 +63,8 @@ module Julewire
       assert_equal :value, values.fetch(:symbol)
       assert_equal 1, values.fetch(:integer)
       assert_in_delta 1.5, values.fetch(:float)
-      assert_same true, values.fetch(:true_value)
-      assert_same false, values.fetch(:false_value)
+      assert_true values.fetch(:true_value)
+      assert_false values.fetch(:false_value)
     end
 
     def test_event_payload_normalizes_time_values_to_utc
@@ -177,10 +176,10 @@ module Julewire
         "error" => RuntimeError.new("boom")
       )
 
-      assert_equal({ class: "Object" }, values.fetch("caller"))
-      assert_equal "events", values.dig("message", :topic)
-      assert_equal({ count: 1 }, values.fetch("messages"))
-      refute_includes values, "error"
+      assert_equal({ class: "Object" }, values.fetch(:caller))
+      assert_equal "events", values.dig(:message, :topic)
+      assert_equal({ count: 1 }, values.fetch(:messages))
+      refute_includes values, :error
     end
 
     def test_event_payload_hides_caller_values_as_class_only

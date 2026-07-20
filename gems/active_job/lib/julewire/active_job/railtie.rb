@@ -14,7 +14,7 @@ module Julewire
           return unless settings.enabled?
 
           ActiveSupport.on_load(:active_job) do
-            Julewire::ActiveJob.install!(base: self, configuration: settings)
+            ActiveJob.install!(base: self, configuration: settings)
           end
         end
       end

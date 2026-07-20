@@ -24,7 +24,7 @@ module Julewire
         reject_unknown_options!(options)
         @destinations = options.fetch(:destinations) { Destinations::Registry.new }
         @emit_non_standard_exception_summaries = options.fetch(:emit_non_standard_exception_summaries, false)
-        @error_backtrace_lines = options.fetch(:error_backtrace_lines, Core::MAX_BACKTRACE_LINES)
+        @error_backtrace_lines = options.fetch(:error_backtrace_lines, MAX_BACKTRACE_LINES)
         @labels = options.fetch(:labels) { Fields::StaticLabels.new }
         @level = options.fetch(:level, :debug)
         @on_drop = options.fetch(:on_drop, nil)

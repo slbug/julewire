@@ -11,12 +11,14 @@ The runtime stores immutable snapshots of:
 - pipeline
 - whether the active pipeline has been closed
 
-Writes are serialized where state transitions need serialization. Main-ractor
-hot-path reads use the current frozen runtime state without taking a global
-runtime lock; state transitions swap that reference under the runtime state
-mutex. Health and counters use their own synchronization outside that mutex.
-Non-main ractors use ractor-local runtime storage because they cannot touch the
-main runtime object directly.
+Main-ractor hot-path reads use the current frozen runtime state without taking
+a global runtime lock. State transitions replace that snapshot atomically;
+configure and reset are additionally serialized with the configure mutex while
+close may overlap them. The successful atomic transition owns the previous
+pipeline lifecycle, so concurrent close/reset operations cannot close the same
+pipeline twice. Health and counters use their own synchronization. Non-main
+ractors use ractor-local runtime storage because they cannot touch the main
+runtime object directly.
 
 Configuration, reconfigure, reset, and close are state transitions. They should
 stay boring and explicit.
@@ -67,10 +69,15 @@ extensions do not pay repeated equivalent-key scans.
 
 `Records::RawInput` reads app-facing emit input before record construction.
 `Integration::Values::Read` extracts best-effort values from framework objects.
-`Integration::Values::Shape` normalizes adapter-built hashes. `Fields::FieldSet`
-owns trusted field-bag copying, merging, and key normalization after values have
-entered core. `Fields::Lookup` is for display reads that tolerate symbol/string
-keys and return `nil` for unreadable inputs.
+`Integration::Values::Shape` normalizes adapter-built hashes at framework
+ingress. `Fields::FieldSet` owns public field-bag copying, merging, and key
+normalization at application or framework ingress. Once data is owned,
+`Integration::Protocol` and strict deep validation require recursively Symbol-
+keyed hashes; cross-gem code does not repair String keys. `Fields::Lookup` is
+for best-effort display reads with the exact requested key and returns `nil` for
+unreadable inputs; it does not bridge Symbol/String key forms inside normalized
+records. Presentation code that reads decoded wire payloads uses its separate
+`wire_value` helper at that restore boundary.
 
 ## Context Storage
 
@@ -90,10 +97,10 @@ custom destination objects.
 
 ## Scheduling
 
-`Scheduling::DeadlineScheduler` is the small stdlib timer heap. Main-process
-diagnostics and framework integrations use `Scheduling::SharedScheduler` so
-they do not each keep a background timer thread. Ractor integrations keep their
-own schedulers because worker ractors cannot share the main scheduler object.
+Main-process diagnostics and framework integrations use the process-owned
+`Scheduling::SharedScheduler` so they do not each keep a background timer
+thread. Ractor integrations own their stdlib timeout threads because a worker
+Ractor cannot access the main scheduler's concurrent-ruby objects.
 
 ## Remote Envelope Hook
 
@@ -102,12 +109,6 @@ for bridge code. The bridge reconstructs the scope snapshot, and core rebuilds
 a normal record from input, context, attributes, carry, neutral, and that
 snapshot before emitting through the active pipeline. Bridges pass `owned: true`
 only for Julewire-owned wire data. It is not a public application API.
-
-## Test Seams
-
-Some private methods are intentionally reachable through `Julewire::Testing`.
-They reset process-global registries or storage that normal applications should
-not touch directly.
 
 ## Emit Entrypoints
 

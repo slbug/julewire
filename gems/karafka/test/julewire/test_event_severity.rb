@@ -4,9 +4,9 @@ require "test_helper"
 
 module Julewire
   class TestKarafkaEventSeverity < Minitest::Test
-    include JulewireCapture
-
     cover Julewire::Karafka::EventSeverity
+    cover "Julewire::Karafka::EventSeverity.error_severity"
+    include JulewireCapture
 
     FakeEvent = KarafkaTestSupport::FakeEvent
     class CountHash < Hash
@@ -117,24 +117,63 @@ module Julewire
     end
 
     def test_fetch_received_severity_counts_hash_subclasses_and_size_objects
-      assert_equal :debug, Julewire::Karafka::EventSeverity.consumer(
-        "connection.listener.fetch_loop.received",
+      assert_fetch_received_severity(:debug, {})
+      assert_fetch_received_severity(:debug, CountHash[count: 0])
+      assert_fetch_received_severity(:debug, SizeOnly.new(0))
+      assert_fetch_received_severity(:info, SizeOnly.new(1))
+    end
+
+    def test_event_severity_normalizes_event_names_and_signals
+      assert_equal :error, Julewire::Karafka::EventSeverity.consumer(:"swarm.manager.stopping",
+                                                                     event: FakeEvent.new,
+                                                                     payload: {})
+      assert_equal :error, Julewire::Karafka::EventSeverity.producer(:"error.occurred", {})
+      assert_consumer_severity(:warn, "process.notice_signal", event: FakeEvent.new(signal: "sigttin"))
+      assert_equal :warn, Julewire::Karafka::EventSeverity.consumer(
+        "process.notice_signal",
         event: FakeEvent.new,
-        payload: { messages_buffer: CountHash[count: 0] }
-      )
-      assert_equal :info, Julewire::Karafka::EventSeverity.consumer(
-        "connection.listener.fetch_loop.received",
-        event: FakeEvent.new,
-        payload: { messages_buffer: SizeOnly.new(1) }
+        payload: { signal: :TTIN }
       )
     end
 
-    def test_event_severity_handles_payload_and_event_edge_cases
-      event = Object.new
-      event.define_singleton_method(:[]) { |_key| "worker.process.error" }
+    def test_event_severity_prefers_payload_values_over_event_payload
+      assert_equal :fatal, Julewire::Karafka::EventSeverity.consumer(
+        "error.occurred",
+        event: FakeEvent.new(type: "not.fatal"),
+        payload: { type: :"worker.process.error" }
+      )
+      assert_equal :debug, Julewire::Karafka::EventSeverity.consumer(
+        "connection.listener.fetch_loop.received",
+        event: FakeEvent.new(messages_buffer: [Object.new]),
+        payload: { messages_buffer: [] }
+      )
+      assert_equal :warn, Julewire::Karafka::EventSeverity.consumer(
+        "process.notice_signal",
+        event: FakeEvent.new(signal: :TERM),
+        payload: { signal: :TTIN }
+      )
+    end
 
+    def test_event_severity_uses_event_payload_when_payload_is_missing
+      assert_equal :debug, Julewire::Karafka::EventSeverity.consumer(
+        "connection.listener.fetch_loop.received",
+        event: FakeEvent.new(messages_buffer: []),
+        payload: {}
+      )
+    end
+
+    def test_event_severity_defaults_unknown_consumer_events_to_info
+      assert_equal :info, Julewire::Karafka::EventSeverity.consumer("custom.event",
+                                                                    event: FakeEvent.new,
+                                                                    payload: {})
+      assert_equal :info, Julewire::Karafka::EventSeverity.consumer("process.notice_signal",
+                                                                    event: FakeEvent.new,
+                                                                    payload: {})
+    end
+
+    def test_event_severity_handles_payload_and_event_edge_cases
       assert_nil Julewire::Karafka::EventSeverity.payload_severity(Object.new)
-      assert_equal :fatal, Julewire::Karafka::EventSeverity.consumer("error.occurred", event: event, payload: {})
+      assert_consumer_severity(:fatal, "error.occurred", event: FakeEvent.new(type: "worker.process.error"))
       assert_nil Julewire::Karafka::EventSeverity.collection_count(Object.new)
       assert_equal :info, Julewire::Karafka::EventSeverity.consumer(
         "connection.listener.fetch_loop.received",
@@ -146,6 +185,14 @@ module Julewire
       bad_event.define_singleton_method(:[]) { |_key| raise "bad event" }
 
       assert_nil Julewire::Karafka::EventSeverity.raw_event_value(bad_event, :type)
+    end
+
+    def assert_fetch_received_severity(expected, messages_buffer)
+      assert_consumer_severity(expected, "connection.listener.fetch_loop.received", payload: { messages_buffer: })
+    end
+
+    def assert_consumer_severity(expected, event_name, event: FakeEvent.new, payload: {})
+      assert_equal expected, Julewire::Karafka::EventSeverity.consumer(event_name, event:, payload:)
     end
   end
 end

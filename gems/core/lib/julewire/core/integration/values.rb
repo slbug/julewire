@@ -59,8 +59,6 @@ module Julewire
             def path_value(object, path, default: nil)
               current = object
               Array(path).each do |key|
-                return default if current.nil?
-
                 current = indexed_value(current, key)
                 return default if current.equal?(MISSING)
               end
@@ -68,11 +66,6 @@ module Julewire
             end
 
             def first_value(source, keys:)
-              if source.is_a?(Hash)
-                found = direct_hash_first_value(source, keys)
-                return found unless found.equal?(MISSING)
-              end
-
               keys.each do |key|
                 found = indexed_value(source, key)
                 return found unless found.equal?(MISSING) || blank_value?(found)
@@ -81,16 +74,6 @@ module Julewire
             end
 
             private
-
-            def direct_hash_first_value(source, keys)
-              keys.each do |key|
-                next unless source.key?(key)
-
-                found = source[key]
-                return found unless blank_value?(found)
-              end
-              MISSING
-            end
 
             def indexed_value(source, key)
               return hash_value(source, key, default: MISSING) if source.is_a?(Hash)

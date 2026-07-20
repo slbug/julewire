@@ -11,7 +11,9 @@ module Julewire
 
         private_constant :NestedCallback
 
-        Failure = Data.define(:at, :class_name, :metadata) do
+        Failure = Data.define(:at, :class_name, :metadata)
+
+        class Failure
           def to_h
             {
               action: metadata[:action],
@@ -42,7 +44,7 @@ module Julewire
           end
 
           def failure?(result)
-            result.is_a?(Failure)
+            result.instance_of?(Failure)
           end
 
           def nested_callback_result(metadata)

@@ -3,6 +3,10 @@ plugins:
   - rubocop-minitest
   - rubocop-rake
 
+inherit_mode:
+  merge:
+    - Exclude
+
 AllCops:
   TargetRubyVersion: 3.4
   NewCops: enable
@@ -10,7 +14,6 @@ AllCops:
   Exclude:
     - "**/tmp/**/*"
     - "**/vendor/**/*"
-    - "gems/rails/gemfiles/*.gemfile"
 
 Style/Documentation:
   Enabled: false
@@ -22,6 +25,8 @@ Style/ReturnNil:
 Style/ClassMethodsDefinitions:
   Enabled: true
   EnforcedStyle: self_class
+  Exclude:
+    - "**/test/**/*"
 
 Style/ItBlockParameter:
   Enabled: true
@@ -29,24 +34,49 @@ Style/ItBlockParameter:
 
 Metrics/AbcSize:
   Max: 30
+  Exclude:
+    - "**/test/**/*"
+    - "**/lib/**/testing/contracts/**/*.rb"
 
 Metrics/ClassLength:
   Max: 220
+  Exclude:
+    - "**/test/**/*"
 
 Metrics/ModuleLength:
   Max: 130
+  Exclude:
+    - "**/test/**/*"
+    - "**/lib/**/testing/contracts/**/*.rb"
 
 Metrics/CyclomaticComplexity:
   Max: 12
+  Exclude:
+    - "**/test/**/*"
 
 Metrics/MethodLength:
   Max: 25
+  Exclude:
+    - "**/test/**/*"
+    - "**/lib/**/testing/contracts/**/*.rb"
 
 Metrics/ParameterLists:
   Max: 8
+
+Metrics/PerceivedComplexity:
+  Exclude:
+    - "**/test/**/*"
 
 Style/StringLiterals:
   EnforcedStyle: double_quotes
 
 Style/StringLiteralsInInterpolation:
   EnforcedStyle: double_quotes
+
+# Exact Boolean contracts use minitest-strict's assert_true/assert_false.
+# These unsafe cops would weaken them back to truthiness assertions.
+Minitest/AssertTruthy:
+  Enabled: false
+
+Minitest/RefuteFalse:
+  Enabled: false

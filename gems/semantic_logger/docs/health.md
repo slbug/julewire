@@ -11,7 +11,7 @@ Destination health includes:
 - destination `status`
 - destination write/failure counts
 - transport write/failure counts
-- async queue state
+- async queue state and lag settings
 - file appender metadata
 - child appender shape for multi-appender output
 - lifecycle warnings
@@ -38,6 +38,8 @@ One practical mapping is:
 | `destinations.*.transport.counts.*` | `julewire_semantic_logger_transport_total{destination,event}` |
 | `destinations.*.transport.appender.queue_size` | `julewire_semantic_logger_queue_size{destination}` |
 | `destinations.*.transport.appender.max_queue_size` | `julewire_semantic_logger_queue_capacity{destination}` |
+| `destinations.*.transport.appender.lag_check_interval` | `julewire_semantic_logger_lag_check_interval{destination}` |
+| `destinations.*.transport.appender.lag_threshold_s` | `julewire_semantic_logger_lag_threshold_seconds{destination}` |
 | `destinations.*.transport.warnings.*` | `julewire_semantic_logger_warning{destination,reason}` |
 
 Treat core health paths as inputs, not as a global metrics schema.

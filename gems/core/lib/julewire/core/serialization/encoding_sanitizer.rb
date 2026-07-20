@@ -9,7 +9,6 @@ module Julewire
             raise TypeError, "value must be a String" unless value.is_a?(String)
 
             return value if valid_utf8?(value) || valid_ascii_only?(value)
-            return value.scrub("?") if utf8?(value)
 
             encode_utf8(value)
           rescue EncodingError
@@ -23,7 +22,7 @@ module Julewire
           end
 
           def valid_ascii_only?(value)
-            value.ascii_only? && value.valid_encoding?
+            value.ascii_only?
           end
 
           def utf8?(value)
@@ -31,7 +30,7 @@ module Julewire
           end
 
           def encode_utf8(value)
-            value.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "?")
+            value.encode(Encoding::UTF_8, invalid: :replace, replace: "?")
           end
         end
       end

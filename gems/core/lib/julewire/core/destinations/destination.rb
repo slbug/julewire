@@ -4,6 +4,8 @@ module Julewire
   module Core
     module Destinations
       class Destination
+        include ProcessorHandling
+
         COUNTER_KEYS = %i[
           callback_error
           encode_error
@@ -15,6 +17,7 @@ module Julewire
           output_rejected
           processor_dropped
           processor_error
+          processor_invalid
           received
           record_too_large
         ].freeze
@@ -30,8 +33,7 @@ module Julewire
           on_drop:,
           on_failure:,
           output:,
-          error_backtrace_lines: Core::MAX_BACKTRACE_LINES,
-          processors: []
+          processors: nil
         )
           @name = Destinations.normalize_name(name)
           @formatter = validate_callable(formatter, name: :formatter)
@@ -43,7 +45,7 @@ module Julewire
           raise ArgumentError, "destination #{@name.inspect} output is required" if output.nil?
 
           @output = Sink.wrap(output, close_output: close_output)
-          @processor_chain = processor_chain(processors, error_backtrace_lines)
+          @processor_chain = processor_chain(processors)
           initialize_tracking
           @write_step = build_write_step
         end
@@ -57,10 +59,7 @@ module Julewire
         end
 
         def emit_processed_record(record, degradation_marker:)
-          return unless @write_step.call(record) == :accepted
-
-          clear_degradation_if_unchanged(degradation_marker)
-          nil
+          clear_degradation_if_unchanged(degradation_marker) if @write_step.call(record)
         end
 
         def flush(timeout: nil)
@@ -73,7 +72,7 @@ module Julewire
 
         def after_fork!
           initialize_tracking
-          @output.after_fork! if @output.respond_to?(:after_fork!)
+          @output.after_fork!
           self
         rescue StandardError => e
           notify_failure(
@@ -86,9 +85,7 @@ module Julewire
         end
 
         def resource_identity
-          return @output.resource_identity if @output.respond_to?(:resource_identity)
-
-          @output
+          @output.resource_identity
         end
 
         def health
@@ -146,7 +143,7 @@ module Julewire
 
         def record_step_metadata(metadata)
           record = metadata.delete(:record)
-          metadata[:record_metadata] = Records::Metadata.call(record) if record
+          metadata[:record_metadata] = Records::Metadata.call(record)
           metadata
         end
 
@@ -166,7 +163,7 @@ module Julewire
         end
 
         def record_loss(reason, metadata)
-          record_metadata = metadata.fetch(:record_metadata, {})
+          record_metadata = metadata.fetch(:record_metadata)
           @health.record_loss(
             reason: reason,
             counter: nil,
@@ -175,10 +172,6 @@ module Julewire
             severity: record_metadata[:severity],
             source: record_metadata[:source]
           )
-        end
-
-        def clear_degradation
-          @health.clear_degradation
         end
 
         def clear_degradation_if_unchanged(marker)
@@ -195,48 +188,6 @@ module Julewire
           callback
         end
 
-        def processor_chain(processors, error_backtrace_lines)
-          processors = processor_entries(processors)
-          return if processors.empty?
-
-          Processing::ProcessorChain.new(
-            processors: processors,
-            error_backtrace_lines: error_backtrace_lines,
-            on_error: method(:record_processor_error)
-          )
-        end
-
-        def processor_entries(value)
-          case value
-          when Processing::ProcessorRegistry
-            value.to_a
-          else
-            Processing::ProcessorRegistry.new(Array(value)).to_a
-          end
-        end
-
-        def process_record(record)
-          return record unless @processor_chain
-
-          processed = @processor_chain.call(Records::Draft.from_record(record, freeze_sections: false))
-          if processed.equal?(Processing::ProcessorChain::DROP)
-            increment_counter(:processor_dropped)
-            nil
-          elsif processed.is_a?(Processing::ProcessorChain::ErrorResult)
-            processed.draft.to_record
-          else
-            processed.to_record
-          end
-        rescue StandardError => e
-          notify_failure(e, phase: :destination_processor, record_metadata: Records::Metadata.call(record))
-          nil
-        end
-
-        def record_processor_error(error, record_metadata)
-          increment_counter(:processor_error)
-          notify_failure(error, phase: :destination_processor, record_metadata: record_metadata)
-        end
-
         def call_output_lifecycle(method_name, timeout:)
           Validation.validate_timeout!(timeout, name: :timeout)
           call_output_lifecycle_safely(method_name, timeout)
@@ -244,8 +195,9 @@ module Julewire
 
         def call_output_lifecycle_safely(method_name, timeout)
           # Sink.wrap centralizes timeout-aware lifecycle dispatch for every output.
+          degradation_marker = @health.degradation_marker
           result = @output.public_send(method_name, timeout: timeout)
-          clear_degradation if method_name == :flush && result != false
+          clear_degradation_if_unchanged(degradation_marker) if method_name == :flush && result
           result
         rescue StandardError => e
           notify_failure(
@@ -258,9 +210,7 @@ module Julewire
         end
 
         def output_class_name
-          return @output.output_class_name if @output.respond_to?(:output_class_name)
-
-          @output.class.name
+          @output.output_class_name
         end
       end
     end

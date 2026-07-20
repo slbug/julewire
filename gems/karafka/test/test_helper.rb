@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-require "julewire/core/testing/coverage"
-Julewire::Core::Testing::Coverage.start!
+require_relative "../../../support/testing/coverage"
+Julewire::TestSupport::Coverage.start!
 
 require "karafka"
 require "julewire/karafka"
@@ -12,10 +12,11 @@ require "karafka/core/monitoring/monitor"
 require "karafka/core/monitoring/notifications"
 require "karafka/testing/minitest/helpers"
 require "minitest/autorun"
-require "julewire/core/testing/test_reports"
-Julewire::Core::Testing::TestReports.start!
+require "minitest/strict"
+require_relative "../../../support/testing/test_reports"
+Julewire::TestSupport::TestReports.start!
 require "mocha/minitest"
-require "mutant/minitest/coverage"
+require_relative "../../../support/mutant/minitest_coverage"
 require_relative "support/julewire/karafka/capture"
 require_relative "support/julewire/karafka/fakes"
 

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_boolean"
+
 module Julewire
   module Core
     module Execution
@@ -8,11 +10,8 @@ module Julewire
           @scope = scope
           @on_finish = on_finish
           @on_finish_failure = on_finish_failure
-          @mutex = Mutex.new
-          @finished = false
+          @finished = Concurrent::AtomicBoolean.new
         end
-
-        attr_reader :scope
 
         def snapshot = View.new(@scope)
 
@@ -32,44 +31,40 @@ module Julewire
           ContextStore.current.with_scope(@scope, &)
         end
 
-        def finish(reason: :closed, fields: {}, attributes: {}, error: nil, severity: nil)
+        def finish(reason: :closed, fields: nil, attributes: nil, error: nil, severity: nil)
           # Finishing is one-shot: retrying after partial summary mutation can
           # duplicate completion data, so failures are reported and stop here.
           return false unless mark_finished
 
           add_completion_attributes(reason)
-          @scope.add_summary(fields) unless fields.empty?
-          @scope.add_summary_attributes(attributes) unless attributes.empty?
+          @scope.add_summary(fields)
+          @scope.add_summary_attributes(attributes)
           @scope.finish_owned(error: error, severity: severity)
           call_finish
           true
         rescue StandardError => e
-          report_finish_failure(e)
+          report_finish_failure(e, phase: :summary_finish)
           false
         end
 
         private
 
         def mark_finished
-          @mutex.synchronize do
-            return false if @finished
-
-            @finished = true
-          end
+          @finished.make_true
         end
 
         def add_completion_attributes(reason)
-          @scope.add_summary_attributes({ "julewire.completion": reason.to_s }, owned: true)
+          @scope.add_summary_attributes({ "julewire.completion": reason.to_s })
         end
 
         def call_finish
           @on_finish&.call(@scope)
         rescue StandardError => e
-          report_finish_failure(e)
+          report_finish_failure(e, phase: :summary_emit)
         end
 
-        def report_finish_failure(error)
-          @on_finish_failure&.call(error)
+        def report_finish_failure(error, phase:)
+          @on_finish_failure.call(error, phase: phase)
         rescue StandardError
           nil
         end

@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_fixnum"
+require "concurrent/atomic/atomic_reference"
+
 module Julewire
   module Core
     module Diagnostics
@@ -15,106 +18,91 @@ module Julewire
           @callback_metadata = callback_metadata
           @failure_counter = failure_counter
           @track_failures = track_failures
-          @mutex = Mutex.new
-          counter_keys = counter_keys.to_a
+          counter_keys = counter_keys.map { it }
           counter_keys = counter_keys.union([:failures]) if @track_failures
-          @counts = counter_keys.to_h { [it, 0] }
-          @current_degradation = nil
-          @last_callback_failure = nil
-          @last_failure = nil
-          @last_loss = nil
+          @counts = counter_keys.to_h { [it, Concurrent::AtomicFixnum.new] }
+          @current_degradation = Concurrent::AtomicReference.new
+          @last_callback_failure = Concurrent::AtomicReference.new
+          @last_failure = Concurrent::AtomicReference.new
+          @last_loss = Concurrent::AtomicReference.new
         end
 
         def increment(key, by: 1)
-          @mutex.synchronize { increment_unlocked(key, by: by) }
+          @counts.fetch(key).increment(by)
         end
 
         def counts
-          @mutex.synchronize { @counts.dup.freeze }
+          @counts.to_h { |key, counter| [key, counter.value] }.freeze
         end
 
         def degradation_marker
-          @mutex.synchronize { @current_degradation }
+          @current_degradation.get
         end
 
         def degraded?(status_from: :current)
-          @mutex.synchronize { degraded_unlocked?(status_from) }
+          degraded_from?(status_from)
         end
 
         def last_callback_failure
-          @mutex.synchronize { @last_callback_failure }
+          @last_callback_failure.get
         end
 
         def last_failure
-          @mutex.synchronize { @last_failure }
+          @last_failure.get
         end
 
         def last_loss
-          @mutex.synchronize { @last_loss }
-        end
-
-        def clear_degradation
-          @mutex.synchronize { @current_degradation = nil }
+          @last_loss.get
         end
 
         def clear_degradation_if_unchanged(marker)
-          @mutex.synchronize { @current_degradation = nil if @current_degradation.equal?(marker) }
+          @current_degradation.compare_and_set(marker, nil)
         end
 
         def clear_failures!
-          @mutex.synchronize do
-            @current_degradation = nil
-            @last_callback_failure = nil
-            @last_failure = nil
-            @last_loss = nil
-          end
+          @current_degradation.set(nil)
+          @last_callback_failure.set(nil)
+          @last_failure.set(nil)
+          @last_loss.set(nil)
           self
         end
 
         def record_failure(error, callback: nil, counter: @failure_counter, degrade: true, **metadata)
           failure = FailureSnapshot.build(error, **metadata)
-          @mutex.synchronize do
-            increment_unlocked(:failures) if @track_failures
-            increment_unlocked(counter) if counter && counter != :failures && @counts.key?(counter)
-            @last_failure = failure
-            @current_degradation = failure if degrade
-          end
+          increment(:failures) if @track_failures
+          increment(counter) if counter && !counter.equal?(:failures) && @counts.key?(counter)
+          @last_failure.set(failure)
+          @current_degradation.set(failure) if degrade
           notify_failure_callback(callback, error, metadata)
           failure
         end
 
         def record_callback_failure(callback_failure)
-          @mutex.synchronize do
-            @last_callback_failure = callback_failure.to_h
-            increment_unlocked(@callback_failure_counter) if @callback_failure_counter
-          end
+          @last_callback_failure.set(callback_failure.to_h)
+          increment(@callback_failure_counter) if @callback_failure_counter
         end
 
         def record_loss(reason:, counter: reason, degrade: true, **metadata)
           loss = { reason: reason }.merge(metadata).compact.freeze
-          @mutex.synchronize do
-            increment_unlocked(counter) if counter && @counts.key?(counter)
-            @last_loss = loss
-            @current_degradation = loss if degrade
-          end
+          increment(counter) if counter && @counts.key?(counter)
+          @last_loss.set(loss)
+          @current_degradation.set(loss) if degrade
           loss
         end
 
         def record_success
-          @mutex.synchronize { @current_degradation = nil }
+          @current_degradation.set(nil)
           self
         end
 
         def snapshot(status: nil, status_from: :current, include_loss: false, **fields)
-          @mutex.synchronize do
-            result = {
-              counts: @counts.dup.freeze,
-              last_failure: @last_failure,
-              status: status || (degraded_unlocked?(status_from) ? :degraded : :ok)
-            }
-            result[:last_loss] = @last_loss if include_loss
-            result.merge(fields).compact.freeze
-          end
+          result = {
+            counts: counts,
+            last_failure: last_failure,
+            status: status || (degraded_from?(status_from) ? :degraded : :ok)
+          }
+          result[:last_loss] = last_loss if include_loss
+          result.merge(fields).compact.freeze
         end
 
         private
@@ -124,16 +112,12 @@ module Julewire
           record_callback_failure(callback_result) if CallbackNotifier.failure?(callback_result)
         end
 
-        def increment_unlocked(key, by: 1)
-          @counts[key] = @counts.fetch(key) + by
-        end
-
-        def degraded_unlocked?(status_from)
+        def degraded_from?(status_from)
           case status_from
           when :current
-            !!@current_degradation
+            !!degradation_marker
           when :failure_or_loss
-            !!(@last_failure || @last_loss)
+            !!(last_failure || last_loss)
           else
             raise ArgumentError, "unknown health status source: #{status_from.inspect}"
           end

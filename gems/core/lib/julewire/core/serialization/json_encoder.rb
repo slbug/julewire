@@ -13,7 +13,7 @@ module Julewire
           max_array_items: Serializer::DEFAULT_MAX_ARRAY_ITEMS,
           max_hash_keys: Serializer::DEFAULT_MAX_HASH_KEYS,
           compact_empty: true,
-          max_backtrace_lines: Core::MAX_BACKTRACE_LINES,
+          max_backtrace_lines: MAX_BACKTRACE_LINES,
           append_newline: true
         )
           @max_depth = max_depth
@@ -23,6 +23,7 @@ module Julewire
           @compact_empty = compact_empty
           @max_backtrace_lines = max_backtrace_lines
           @line_suffix = append_newline ? "\n" : ""
+          # `append_newline` is suffix-only; it does not change serializer shape.
           @serializer_key = [
             @max_depth,
             @max_string_bytes,
@@ -30,11 +31,11 @@ module Julewire
             @max_hash_keys,
             @compact_empty,
             @max_backtrace_lines
-          ].freeze
+          ]
         end
 
         def call(payload)
-          JSON.generate(serialized_payload(payload), allow_nan: false).tap do |json|
+          JSON.generate(serialized_payload(payload)).tap do |json|
             json << @line_suffix
           end
         end
@@ -42,14 +43,11 @@ module Julewire
         private
 
         def serialized_payload(payload)
-          serializer = cached_serializer
-          return build_serializer.serialize(payload) if serializer.in_use?
-
-          serializer.serialize(payload)
-        end
-
-        def cached_serializer
-          SerializerPool.serializer(:julewire_core_json_encoder_serializers, @serializer_key) { build_serializer }
+          SerializerPool.serialize(
+            :julewire_core_json_encoder_serializers,
+            @serializer_key,
+            payload
+          ) { build_serializer }
         end
 
         def build_serializer
@@ -59,8 +57,7 @@ module Julewire
             max_array_items: @max_array_items,
             max_hash_keys: @max_hash_keys,
             compact_empty: @compact_empty,
-            max_backtrace_lines: @max_backtrace_lines,
-            copy_strings: false
+            max_backtrace_lines: @max_backtrace_lines
           )
         end
       end

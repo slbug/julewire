@@ -4,6 +4,7 @@ require "test_helper"
 
 module Julewire
   class TestExecutionSummaryMetadata < Minitest::Test
+    cover Julewire::Core::Execution::Scope
     def test_with_execution_can_set_summary_source_and_event
       records = capture_request_summary_records
 
@@ -27,6 +28,27 @@ module Julewire
       end
 
       assert_equal :debug, records.fetch(0).fetch(:severity)
+    end
+
+    def test_explicit_summary_severity_is_normalized
+      records = capture_julewire_records do
+        Julewire.with_execution(
+          type: :request,
+          summary_event: "request.completed",
+          summary_severity: "WARN",
+          summary_source: "web"
+        ) do
+          Julewire.summary.add(status: 200)
+        end
+      end
+
+      assert_equal :warn, records.fetch(0).fetch(:severity)
+    end
+
+    def test_scope_summary_input_normalizes_explicit_summary_severity
+      scope = Julewire::Core::Execution::Scope.new(type: :request, summary_severity: "WARN")
+
+      assert_equal :warn, scope.owned_summary_record_input.fetch(:severity)
     end
 
     def test_error_summary_stays_error_with_explicit_summary_severity

@@ -4,6 +4,15 @@ require "test_helper"
 
 module Julewire
   class TestPropagationRestore < Minitest::Test
+    cover Julewire::Core::Propagation
+    def test_propagation_restore_requires_block
+      error = assert_raises(ArgumentError) do
+        Julewire::Core::Propagation.restore({})
+      end
+
+      assert_equal "block required", error.message
+    end
+
     def test_propagation_restore_feeds_context_and_execution_into_next_scope
       envelope = captured_operation_envelope
 
@@ -77,6 +86,20 @@ module Julewire
       assert_empty restored_lineage.ancestors
     end
 
+    def test_malformed_execution_section_does_not_activate_linked_lineage
+      restored_execution = nil
+      restored_lineage = nil
+
+      Julewire::Core::Propagation.restore({ execution: "bad-execution" }, link_executions: true) do
+        restored_execution, restored_lineage = capture_active_job_execution
+      end
+
+      assert_equal 1, restored_execution[:depth]
+      assert_equal({ type: "active_job", id: "job-1" }, restored_execution[:root])
+      refute_includes restored_execution, :parent
+      assert_empty restored_lineage.ancestors
+    end
+
     def test_propagation_restore_works_across_threads
       envelope = nil
 
@@ -85,13 +108,13 @@ module Julewire
         envelope = Julewire::Core::Propagation.capture
       end
 
-      restored_context, restored_execution = Thread.new do
+      restored_context, restored_execution = safe_thread_value(safe_thread do
         Julewire::Core::Propagation.restore(envelope) do
           Julewire.with_execution(type: :active_job, fields: { job_id: "job-1" }, emit_summary: false) do
             [Julewire.context.to_h, Julewire.current_execution.execution_hash]
           end
         end
-      end.value
+      end)
 
       assert_equal "tenant-1", restored_context[:tenant_id]
       assert_equal "trace-1", restored_execution[:trace_id]
@@ -107,7 +130,7 @@ module Julewire
       recaptured = nil
 
       Julewire::Core::Propagation.restore(envelope) do
-        recaptured = Julewire.thread { Julewire::Core::Propagation.capture }.value
+        recaptured = safe_thread_value(safe_julewire_thread { Julewire::Core::Propagation.capture })
       end
 
       assert_equal "tenant-1", recaptured.dig(:context, "tenant_id")
@@ -123,6 +146,89 @@ module Julewire
       assert_empty context
     end
 
+    def test_direct_propagation_restore_rejects_user_truncation_metadata
+      key = Julewire::Core::Serialization::Serializer::TRUNCATION_METADATA_KEY
+      metadata = Julewire::Core::Serialization::Serializer.truncation_metadata(["context"])
+
+      error = assert_raises(ArgumentError) do
+        Julewire::Core::Propagation.restore({ context: { key => metadata } }) { :unused }
+      end
+
+      assert_equal "_julewire_truncation is reserved for Julewire truncation metadata", error.message
+    end
+
+    def test_propagation_restore_ignores_non_hash_sections_and_accepts_hash_subclasses
+      context = Class.new(Hash).new
+      context[:tenant_id] = "tenant-1"
+      restored = nil
+
+      envelope = {
+        context: context,
+        carry: "bad-carry",
+        execution: "bad-execution"
+      }
+
+      Julewire::Core::Propagation.restore(envelope) do
+        restored = [Julewire.context.to_h, Julewire.carry.to_h, Julewire.current_execution?]
+      end
+
+      assert_equal [{ tenant_id: "tenant-1" }, {}, false], restored
+      refute_includes restored[1], :value
+    end
+
+    def test_owned_propagation_restore_rejects_non_symbol_keys_before_yielding
+      yielded = false
+
+      error = assert_raises(TypeError) do
+        Julewire::Core::Propagation.restore({ context: { "request_id" => "request-1" } }, owned: true) do
+          yielded = true
+        end
+      end
+
+      assert_false yielded
+      assert_equal "record must not use string keys", error.message
+    end
+
+    def test_owned_propagation_restore_rejects_top_level_string_keys
+      error = assert_raises(TypeError) do
+        Julewire::Core::Propagation.restore({ "context" => { request_id: "request-1" } }, owned: true) { flunk }
+      end
+
+      assert_equal "record must not use string keys", error.message
+    end
+
+    def test_owned_propagation_restore_rejects_malformed_present_sections
+      context_error = assert_raises(TypeError) do
+        Julewire::Core::Propagation.restore({ context: "bad-context" }, owned: true) { flunk }
+      end
+      execution_error = assert_raises(TypeError) do
+        Julewire::Core::Propagation.restore({ execution: "bad-execution" }, owned: true) { flunk }
+      end
+
+      assert_equal "propagation context must be a Hash", context_error.message
+      assert_equal "propagation execution must be a Hash", execution_error.message
+    end
+
+    def test_owned_propagation_restore_accepts_absent_sections
+      restored = Julewire::Core::Propagation.restore({ execution: { trace_id: "trace-1" } }, owned: true) do
+        Julewire.with_execution(type: :job, emit_summary: false) do
+          [Julewire.context.to_h, Julewire.current_execution.execution_hash.fetch(:trace_id)]
+        end
+      end
+
+      assert_equal [{}, "trace-1"], restored
+    end
+
+    def test_owned_propagation_restore_accepts_hash_subclass_sections
+      context = Class.new(Hash).new.merge!(request_id: "request-1")
+
+      restored = Julewire::Core::Propagation.restore({ context: context }, owned: true) do
+        Julewire.context.to_h
+      end
+
+      assert_equal({ request_id: "request-1" }, restored)
+    end
+
     def test_restored_string_keys_do_not_duplicate_later_symbol_context_keys
       envelope = { context: { "tenant_id" => "from-envelope" } }
       restored = nil
@@ -135,6 +241,18 @@ module Julewire
       end
 
       assert_equal({ tenant_id: "from-context" }, restored)
+    end
+
+    def test_direct_restore_copies_unowned_envelope_input
+      envelope = { context: { "tenant" => { "id" => "tenant-1" } } }
+      restored = nil
+
+      Julewire::Core::Propagation.restore(envelope) do
+        envelope.fetch(:context).fetch("tenant")["id"] = "changed"
+        restored = Julewire.context.to_h
+      end
+
+      assert_equal({ tenant: { id: "tenant-1" } }, restored)
     end
 
     def test_nested_propagation_restores_outer_execution_overlay

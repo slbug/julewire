@@ -6,7 +6,7 @@ module Julewire
   # Each gem extends the shared Julewire namespace.
   loader = Zeitwerk::Loader.for_gem_extension(self)
   loader.inflector.inflect("cli" => "CLI")
-  loader.ignore("#{__dir__}/core/testing.rb", "#{__dir__}/core/testing")
+  loader.ignore("#{__dir__}/core/testing.rb")
   loader.setup
 
   module Core
@@ -25,7 +25,7 @@ module Julewire
 
           value.to_sym
         when Symbol
-          raise ArgumentError, "#{name} must not be empty" if value.name.empty?
+          raise ArgumentError, "#{name} must not be empty" if value.empty?
 
           value
         else
@@ -54,11 +54,6 @@ module Julewire
   extend Core::FacadeMethods
 
   Core::RuntimeLocator.current = Core::Runtime.new
-  Core.singleton_class.class_eval do
-    define_method(:loader) { loader }
-    private :loader
-  end
-
   ConsoleFormatter = Core::Records::ConsoleFormatter
   JsonEncoder = Core::Serialization::JsonEncoder
   Match = Core::Processing::Match

@@ -7,21 +7,69 @@ require "stringio"
 module Julewire
   class TestExecutionLineage < Minitest::Test
     cover Julewire::Core::Execution::Lineage
+    cover "Julewire::Core::Execution::Lineage.execution_reference"
+
+    def test_non_array_ancestors_are_ignored
+      lineage = Julewire::Core::Execution::Lineage.new(ancestors: { type: "request" })
+
+      assert_equal [], lineage.ancestors
+    end
+
+    def test_array_subclass_ancestors_are_copied_and_frozen
+      ancestors = Class.new(Array).new([{ type: "request", id: "request-1" }])
+      lineage = Julewire::Core::Execution::Lineage.new(ancestors: ancestors)
+
+      assert_equal [{ type: "request", id: "request-1" }], lineage.ancestors
+      assert_predicate lineage.ancestors.first, :frozen?
+    end
 
     def test_clean_helpers_tolerate_non_hash_inputs
       assert_empty Julewire::Core::Execution::Lineage.clean_execution_hash("nope")
       assert_empty Julewire::Core::Execution::Lineage.clean_normalized_lazy_relationship_hash("nope")
     end
 
+    def test_clean_helpers_accept_hash_subclasses
+      execution = Class.new(Hash).new.merge!(
+        "type" => "job",
+        "id" => "job-1",
+        "ancestors" => [{ "id" => "root" }]
+      )
+
+      assert_equal(
+        { type: "job", id: "job-1" },
+        Julewire::Core::Execution::Lineage.clean_execution_hash(execution)
+      )
+    end
+
+    def test_clean_normalized_lazy_relationship_hash_accepts_hash_subclasses_without_mutating_input
+      execution = Class.new(Hash).new.merge!(
+        type: "job",
+        id: "job-1",
+        ancestors: [{ id: "root" }]
+      )
+
+      cleaned = Julewire::Core::Execution::Lineage.clean_normalized_lazy_relationship_hash(execution)
+
+      assert_equal({ type: "job", id: "job-1" }, cleaned)
+      assert_equal [{ id: "root" }], execution.fetch(:ancestors)
+    end
+
     def test_from_execution_hash_tolerates_non_hash_inputs
       lineage = Julewire::Core::Execution::Lineage.from_execution_hash("nope")
 
       assert_equal 1, lineage.depth
+      assert_nil lineage.root_reference
       assert_empty lineage.ancestors
       refute_predicate lineage, :truncated?
     end
 
-    def test_from_execution_hash_captures_lazy_ancestors
+    def test_from_execution_hash_has_no_root_reference_without_type_or_id
+      lineage = Julewire::Core::Execution::Lineage.from_execution_hash(attributes: { hidden: true })
+
+      assert_nil lineage.root_reference
+    end
+
+    def test_from_execution_hash_captures_ancestors
       lineage = Julewire::Core::Execution::Lineage.from_execution_hash(
         type: "job",
         id: "job-1",
@@ -39,7 +87,80 @@ module Julewire
       assert_predicate lineage, :truncated?
     end
 
-    def test_lineage_accessor_materializes_bounded_parent_chain
+    def test_from_execution_hash_uses_type_and_id_as_root_reference
+      lineage = Julewire::Core::Execution::Lineage.from_execution_hash(type: "job", id: "job-1")
+
+      assert_equal({ type: "job", id: "job-1" }, lineage.root_reference)
+    end
+
+    def test_from_execution_hash_preserves_partial_references
+      type_lineage = Julewire::Core::Execution::Lineage.from_execution_hash(type: "job")
+      id_lineage = Julewire::Core::Execution::Lineage.from_execution_hash(id: "job-1")
+
+      assert_equal({ type: "job" }, type_lineage.root_reference)
+      assert_equal({ id: "job-1" }, id_lineage.root_reference)
+    end
+
+    def test_lineage_ignores_non_positive_explicit_depth
+      parent = Julewire::Core::Execution::Lineage.new(reference: { type: "parent", id: "parent-1" }, depth: 3)
+      child = Julewire::Core::Execution::Lineage.new(
+        reference: { type: "child", id: "child-1" },
+        parent_lineage: parent,
+        parent_reference: { type: "parent", id: "parent-1" },
+        depth: 0
+      )
+      root = Julewire::Core::Execution::Lineage.new(reference: { type: "root", id: "root-1" }, depth: -1)
+
+      assert_equal 4, child.depth
+      assert_equal 1, root.depth
+    end
+
+    def test_lineage_ignores_non_integer_positive_depth_objects
+      depth = Object.new
+      depth.define_singleton_method(:positive?) { true }
+
+      lineage = Julewire::Core::Execution::Lineage.new(reference: { type: "job", id: "job-1" }, depth: depth)
+
+      assert_equal 1, lineage.depth
+    end
+
+    def test_lineage_treats_false_relationship_references_as_absent
+      lineage = Julewire::Core::Execution::Lineage.new(
+        reference: { type: "job", id: "job-1" },
+        parent_reference: false,
+        root_reference: false
+      )
+
+      assert_equal({ type: "job", id: "job-1" }, lineage.root_reference)
+      assert_nil lineage.parent_reference
+      assert_empty lineage.ancestors
+    end
+
+    def test_lineage_copies_and_freezes_direct_relationship_references
+      root = { type: "request", id: "request-1" }
+      parent = { type: "job", id: "job-1" }
+      lineage = Julewire::Core::Execution::Lineage.new(root_reference: root, parent_reference: parent)
+
+      root[:id] = "changed"
+      parent[:id] = "changed"
+
+      assert_equal({ type: "request", id: "request-1" }, lineage.root_reference)
+      assert_equal({ type: "job", id: "job-1" }, lineage.parent_reference)
+      assert_raises(FrozenError) { lineage.root_reference[:id] = "changed-again" }
+      assert_raises(FrozenError) { lineage.parent_reference[:id] = "changed-again" }
+    end
+
+    def test_lineage_truncation_input_is_normalized_to_boolean
+      lineage = Julewire::Core::Execution::Lineage.new(ancestors_truncated: "yes")
+      default_lineage = Julewire::Core::Execution::Lineage.new
+      explicit_lineage = Julewire::Core::Execution::Lineage.new(ancestors: [])
+
+      assert_true lineage.truncated?
+      assert_false default_lineage.truncated?
+      assert_false explicit_lineage.truncated?
+    end
+
+    def test_lineage_accessor_snapshots_bounded_parent_chain
       root = Julewire::Core::Execution::Lineage.new(reference: { type: "root", id: "root-1" })
       child = Julewire::Core::Execution::Lineage.new(
         reference: { type: "child", id: "child-1" },
@@ -115,10 +236,35 @@ module Julewire
         expected_ancestors = (1...depth).map { level_reference(it) }.last(max_ancestors)
 
         assert_equal depth, lineage.depth
-        assert_equal level_reference(1), lineage.root_reference
+        unless level_reference(1) == lineage.root_reference
+          flunk "lineage root reference must preserve the root execution"
+        end
+
         assert_equal expected_ancestors, lineage.ancestors
         assert_equal depth > max_ancestors + 1, lineage.truncated?
       end
+    end
+
+    def test_lineage_truncation_checks_bounded_parent_chain
+      max_ancestors = Julewire::Core::Execution::Lineage::MAX_ANCESTORS
+
+      refute_predicate build_lineage_chain(max_ancestors + 1), :truncated?
+      assert_predicate build_lineage_chain(max_ancestors + 2), :truncated?
+    end
+
+    def test_lineage_truncation_keeps_explicit_ancestors_authoritative
+      max_ancestors = Julewire::Core::Execution::Lineage::MAX_ANCESTORS
+      parent = build_lineage_chain(max_ancestors + 3)
+      lineage = Julewire::Core::Execution::Lineage.new(
+        reference: level_reference(100),
+        parent_lineage: parent,
+        parent_reference: level_reference(99),
+        ancestors: [level_reference(1)]
+      )
+
+      assert_equal [level_reference(1)], lineage.ancestors
+      assert_predicate lineage.ancestors, :frozen?
+      refute_predicate lineage, :truncated?
     end
 
     def test_execution_relationship_hash_does_not_mutate_scope_lineage
@@ -138,6 +284,48 @@ module Julewire
 
       assert_equal({ type: "outer", id: "outer" }, second_snapshot[:root])
       assert_equal({ type: "outer", id: "outer" }, second_snapshot[:parent])
+    end
+
+    def test_lineage_merge_into_frozen_owns_non_relationship_fields
+      payload = { nested: ["original"] }
+      lineage = Julewire::Core::Execution::Lineage.new(reference: { type: "job", id: "job-1" })
+      merged = lineage.merge_into_frozen(type: "job", id: "job-1", payload: payload)
+
+      payload.fetch(:nested) << "changed"
+
+      assert_equal ["original"], merged.dig(:payload, :nested)
+      assert_predicate merged, :frozen?
+      assert_predicate merged.fetch(:payload), :frozen?
+      assert_predicate merged.dig(:payload, :nested), :frozen?
+    end
+
+    def test_lineage_merge_into_frozen_omits_absent_parent_reference
+      lineage = Julewire::Core::Execution::Lineage.new(reference: { type: "job", id: "job-1" })
+
+      merged = lineage.merge_into_frozen(type: "job", id: "job-1")
+
+      refute_includes merged, :parent
+    end
+
+    def test_parent_lineage_without_parent_reference_does_not_append_nil_ancestor
+      parent = Julewire::Core::Execution::Lineage.new(reference: { type: "parent", id: "parent-1" })
+      child = Julewire::Core::Execution::Lineage.new(
+        reference: { type: "child", id: "child-1" },
+        parent_lineage: parent
+      )
+
+      assert_empty child.ancestors
+      refute_predicate child, :truncated?
+    end
+
+    def test_parent_reference_without_parent_lineage_does_not_raise
+      lineage = Julewire::Core::Execution::Lineage.new(
+        reference: { type: "child", id: "child-1" },
+        parent_reference: { type: "parent", id: "parent-1" }
+      )
+
+      assert_empty lineage.ancestors
+      refute_predicate lineage, :truncated?
     end
 
     def test_lineage_relationship_accessors_return_immutable_snapshots

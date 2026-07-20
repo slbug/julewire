@@ -5,7 +5,6 @@ require "test_helper"
 module Julewire
   class TestParameterFilterProcessorEquivalence < Minitest::Test
     cover Julewire::Rails::ParameterFilterProcessor
-
     FAST_PATH_CASES = [
       [
         %i[password token],

@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_boolean"
+require "concurrent/atomic/atomic_reference"
+
 module Julewire
   module Core
     module Diagnostics
@@ -39,31 +42,26 @@ module Julewire
           @interval = Validation.validate_integer_limit!(interval, name: :interval, positive: true)
           @include_ok = include_ok ? true : false
           @scheduler = scheduler
-          @mutex = Mutex.new
-          @last_signature = nil
-          @last_failure = nil
-          @started = false
-          @stopped = false
-          @token = nil
+          @last_failure = Concurrent::AtomicReference.new
+          @last_signature = Concurrent::AtomicReference.new
+          @running = Concurrent::AtomicBoolean.new
+          @schedule_mutex = Mutex.new
           @serializer_pool_key = :"julewire_core_meta_observer_serializers_#{object_id}"
         end
 
         def start!
-          @mutex.synchronize do
-            return self if @started && !@stopped
+          return self unless @running.make_true
 
-            @started = true
-            @stopped = false
-            schedule_next
-          end
+          schedule_next
           self
         end
 
         def stop!
-          token = @mutex.synchronize do
-            @stopped = true
-            @started = false
-            @token
+          token = @schedule_mutex.synchronize do
+            @running.make_false
+            token = @token
+            @token = nil
+            token
           end
           @scheduler.cancel(token) if token
           self
@@ -72,12 +70,7 @@ module Julewire
         def sample!
           health = @runtime.health
           signature = signature_for(health)
-          changed = @mutex.synchronize do
-            changed = signature != @last_signature
-            @last_signature = signature
-            changed
-          end
-          return false unless changed
+          return false if signature.eql?(@last_signature.get_and_set(signature))
           return false unless emit_health?(health)
 
           emit_health(health)
@@ -88,35 +81,38 @@ module Julewire
         end
 
         def health
-          @mutex.synchronize do
-            {
-              event: @event,
-              include_ok: @include_ok,
-              interval: @interval,
-              last_failure: @last_failure,
-              observed_runtime: @runtime_name,
-              running: @started && !@stopped,
-              status: @last_failure ? :degraded : :ok,
-              target_runtime: @target_name
-            }.compact.freeze
-          end
+          failure = @last_failure.get
+          {
+            event: @event,
+            include_ok: @include_ok,
+            interval: @interval,
+            last_failure: failure,
+            observed_runtime: @runtime_name,
+            running: @running.true?,
+            status: failure ? :degraded : :ok,
+            target_runtime: @target_name
+          }.compact.freeze
         end
 
         private
 
         def schedule_next
-          @token = @scheduler.schedule(@interval) { scheduled_sample }
+          @schedule_mutex.synchronize do
+            @token = @scheduler.schedule(@interval) { scheduled_sample } if @running.true?
+          end
         end
 
         def scheduled_sample
+          return false unless @running.true?
+
           sample!
-          @mutex.synchronize { schedule_next unless @stopped }
+          schedule_next
         rescue StandardError => e
           record_failure(e)
         end
 
         def emit_health?(health)
-          @include_ok || health[:status] != :ok
+          @include_ok || !health[:status].eql?(:ok)
         end
 
         def emit_health(health)
@@ -137,23 +133,20 @@ module Julewire
         end
 
         def signature_for(health)
-          serializer = cached_serializer
-          return build_serializer.serialize(health).hash if serializer.in_use?
-
-          serializer.serialize(health).hash
+          Serialization::SerializerPool.serialize_with(cached_serializer, health) { build_serializer }
         end
 
         def cached_serializer
-          Serialization::SerializerPool.serializer(@serializer_pool_key, :signature) { build_serializer }
+          Serialization::SerializerPool.serializer(@serializer_pool_key, nil) { build_serializer }
         end
 
         def build_serializer
-          Serialization::Serializer.new(compact_empty: true)
+          Serializer.new(compact_empty: true)
         end
 
         def record_failure(error)
           failure = FailureSnapshot.build(error, phase: :meta_observer)
-          @mutex.synchronize { @last_failure = failure }
+          @last_failure.set(failure)
         end
       end
     end

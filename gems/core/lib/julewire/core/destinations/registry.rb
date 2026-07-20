@@ -49,7 +49,7 @@ module Julewire
         def build(defaults:)
           output_identities = {}.compare_by_identity
           @definitions.map do |definition|
-            if definition.is_a?(Definition)
+            if definition.instance_of?(Definition)
               definition.build(defaults: defaults, output_identities: output_identities)
             else
               definition

@@ -26,35 +26,31 @@ module Julewire
           source
         ].freeze
 
-        class << self
-          private
-
-          def define(name, **capabilities)
-            Definition.new(
-              name: name,
-              record_hash: true,
-              transform_container: true,
-              app_write: false,
-              integration_write: false,
-              propagate: false,
-              emit_by_default: true,
-              delete_paths: false,
-              stack: false,
-              **capabilities
-            )
-          end
+        definition = lambda do |name, **capabilities|
+          Definition.new(
+            name: name,
+            record_hash: true,
+            transform_container: true,
+            app_write: false,
+            integration_write: false,
+            propagate: false,
+            emit_by_default: true,
+            delete_paths: false,
+            stack: false,
+            **capabilities
+          )
         end
 
         DEFINITIONS = {
-          execution: define(:execution, integration_write: true, propagate: true),
-          context: define(
+          execution: definition.call(:execution, integration_write: true, propagate: true),
+          context: definition.call(
             :context,
             app_write: true,
             integration_write: true,
             propagate: true,
             stack: true
           ),
-          carry: define(
+          carry: definition.call(
             :carry,
             app_write: true,
             integration_write: true,
@@ -63,18 +59,18 @@ module Julewire
             delete_paths: true,
             stack: true
           ),
-          neutral: define(:neutral, integration_write: true, emit_by_default: false, stack: true),
-          attributes: define(
+          neutral: definition.call(:neutral, integration_write: true, emit_by_default: false, stack: true),
+          attributes: definition.call(
             :attributes,
             app_write: true,
             integration_write: true,
             stack: true
           ),
-          labels: define(:labels),
-          payload: define(:payload),
-          metrics: define(:metrics),
-          error: define(:error, record_hash: false),
-          summary: define(
+          labels: definition.call(:labels),
+          payload: definition.call(:payload),
+          metrics: definition.call(:metrics),
+          error: definition.call(:error, record_hash: false),
+          summary: definition.call(
             :summary,
             record_hash: false,
             transform_container: false,

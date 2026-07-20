@@ -7,9 +7,8 @@ module Julewire
       class << self
         def validate_byte_limit!(value, name:)
           return if value.nil?
+          return value if value.instance_of?(Integer) && value.positive?
 
-          validate_integer_limit!(value, name: name, positive: true)
-        rescue ArgumentError
           raise ArgumentError, "#{name} must be nil or a positive Integer"
         end
 
@@ -18,7 +17,7 @@ module Julewire
         end
 
         def validate_integer_limit!(value, name:, positive: false)
-          return value if value.is_a?(Integer) && valid_integer_limit?(value, positive: positive)
+          return value if value.instance_of?(Integer) && valid_integer_limit?(value, positive: positive)
 
           qualifier = positive ? "positive" : "non-negative"
           raise ArgumentError, "#{name} must be a #{qualifier} Integer"

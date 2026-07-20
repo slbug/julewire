@@ -41,11 +41,11 @@ module Julewire
       end
 
       def call(record)
-        Julewire::Record.validate_normalized!(record)
+        Record.validate_normalized!(record)
 
         error = record.fetch(:error)
         operation_options = operation_options(record)
-        neutral_attributes = Core::Fields::AttributeKeys.from(record.fetch(:neutral))
+        neutral_attributes = record.fetch(:neutral)
         source_location_options = SourceLocationOptions.call(record, neutral_attributes)
         entry = {
           "severity" => severity(record.fetch(:severity)),
@@ -67,7 +67,7 @@ module Julewire
 
       private
 
-      def frozen_service_context(value) = value ? Core::Fields::FieldSet.frozen_copy(value) : nil
+      def frozen_service_context(value) = Core::Fields::FieldSet.frozen_copy(value)
 
       def append_special_fields(entry, record, error:, operation_options:, source_location_options:,
                                 neutral_attributes:)
@@ -110,7 +110,6 @@ module Julewire
         return if (value.is_a?(Hash) || value.is_a?(Array)) && value.empty?
 
         entry[key] = value
-        nil
       end
 
       def severity(value) = SEVERITIES.fetch(value)
@@ -134,17 +133,19 @@ module Julewire
       end
 
       def operation_options(record)
-        options = record.dig(:payload, :gcp, :operation)
+        control = record.fetch(:payload)[:gcp]
+        return EMPTY_HASH unless control.is_a?(Hash)
+
+        options = control[:operation]
         options.is_a?(Hash) ? options : EMPTY_HASH
       end
 
       def operation_producer(record, options)
-        options[:producer] || @operation_producer || record[:source] || record[:logger]
+        options[:producer] || @operation_producer || record.fetch(:source) || record.fetch(:logger)
       end
 
       def source_location(error, options)
         return SourceLocation.call(options) unless options.empty?
-        return unless error.is_a?(Hash) && !error.empty?
 
         SourceLocation.from_error(error)
       end
@@ -183,7 +184,7 @@ module Julewire
       end
 
       def remove_gcp_control_payload(payload, control)
-        return payload unless control.is_a?(Hash) && gcp_control_payload?(control)
+        return payload unless control.is_a?(Hash)
 
         cleaned_payload = payload.dup
         cleaned_control = control.dup
@@ -197,11 +198,7 @@ module Julewire
         cleaned_payload
       end
 
-      def gcp_control_payload?(control)
-        control.key?(:operation) || control.key?(:source_location)
-      end
-
-      def julewire_payload(record, error:, operation_options:, stack_trace: nil)
+      def julewire_payload(record, error:, operation_options:, stack_trace:)
         {}.tap do |payload|
           append_log_field(payload, :kind, record.fetch(:kind))
           append_log_field(payload, :event, record.fetch(:event))
@@ -214,19 +211,17 @@ module Julewire
           )
           append_log_field(payload, :context, record.fetch(:context))
           append_log_field(payload, :error, julewire_error(error, stack_trace: stack_trace))
-          append_log_field(payload, :metrics, record[:metrics])
+          append_log_field(payload, :metrics, record.fetch(:metrics))
         end
       end
 
       def julewire_error(error, stack_trace:)
-        return error unless error.is_a?(Hash) && stack_trace
+        return error unless stack_trace
 
         StackTrace.remove_backtraces(error)
       end
 
       def stack_trace(error)
-        return unless error.is_a?(Hash) && !error.empty?
-
         StackTrace.call(error)
       end
 

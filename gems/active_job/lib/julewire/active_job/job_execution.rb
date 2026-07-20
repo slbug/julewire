@@ -6,18 +6,18 @@ module Julewire
   module ActiveJob
     module JobExecution
       class << self
-        def call(job, configuration: Configuration.new, &)
+        def call(job, configuration:, &)
           carrier = carrier_for(job)
           return perform_job(job, configuration, &) unless configuration.propagation?
 
-          result = Julewire::Core::Propagation::Carrier.extract_result(
+          result = Core::Propagation::Carrier.extract_result(
             carrier,
             key: configuration.carrier_key,
             max_bytes: configuration.carrier_max_bytes
           )
           record_carrier_restore_failure(result)
 
-          Julewire::Core::Propagation.restore(result.envelope, owned: true) do
+          Core::Propagation.restore(result.envelope, owned: true) do
             perform_job(job, configuration, &)
           end
         end
@@ -38,32 +38,30 @@ module Julewire
 
         def perform_job(job, configuration, &)
           fields = job_fields(job)
-          Core::Integration::Facade.with_execution(**execution_options(job, configuration, fields)) do
+          Core::Integration::Facade.with_execution(**execution_options(configuration, fields)) do
             install_context(fields)
             perform_with_summary(&)
           end
         end
 
         def carrier_for(job)
-          job.instance_variable_get(CARRIER_IVAR) || {}
+          job.instance_variable_get(CARRIER_IVAR)
         rescue StandardError
-          {}
+          nil
         end
 
-        def execution_options(job, configuration, fields)
-          options = {
+        def execution_options(configuration, fields)
+          {
             type: :job,
-            fields: { job_class: fields[:job_class] || job.class.name },
+            fields: { job_class: fields.fetch(:job_class) },
             attributes: attributes_for(fields),
             neutral: neutral_for(fields),
             inherit_attributes: false,
             summary_event: configuration.summary_event,
             summary_severity: configuration.summary_severity,
-            summary_source: configuration.source
+            summary_source: configuration.source,
+            id: fields[:job_id]
           }
-          job_id = fields[:job_id]
-          options[:id] = job_id if job_id
-          options
         end
 
         def install_context(fields)

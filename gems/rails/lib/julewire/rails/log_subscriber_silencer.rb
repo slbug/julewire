@@ -22,29 +22,16 @@ module Julewire
       class << self
         def silence!
           require_log_subscribers
-          SUBSCRIBERS.each { |class_name, namespace| detach(class_name, namespace) }
+          SUBSCRIBERS.each do |class_name, namespace|
+            subscriber_class = Julewire::RailsSupport::LogSubscribers.constantize(class_name)
+            Julewire::RailsSupport::LogSubscribers.detach(subscriber_class, namespace)
+          end
         end
 
         private
 
         def require_log_subscribers
           LOG_SUBSCRIBER_FILES.each { Core::Integration::Lifecycle.require_optional(it) }
-        end
-
-        def detach(class_name, namespace)
-          subscriber_class = constantize(class_name)
-          return if subscriber_class.nil?
-
-          subscriber_class.detach_from(namespace) if subscriber_class.respond_to?(:detach_from)
-          Julewire::RailsSupport::EventReporter.unsubscribe_log_subscriber(subscriber_class)
-        end
-
-        def constantize(class_name)
-          class_name.split("::").reject(&:empty?).inject(Object) do |namespace, constant_name|
-            break unless namespace.const_defined?(constant_name, false)
-
-            namespace.const_get(constant_name, false)
-          end
         end
       end
     end

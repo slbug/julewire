@@ -12,7 +12,6 @@ module Julewire
             else
               Diagnostics::ProcessIntegrationHealth.record_failure(integration, error, **metadata)
             end
-            nil
           end
 
           def record_success(integration, runtime: nil, **)
@@ -21,14 +20,12 @@ module Julewire
             else
               Diagnostics::ProcessIntegrationHealth.record_success(integration)
             end
-            nil
           end
 
           def with_failure_health(integration, component:, action:, runtime: nil, **metadata)
             yield.tap { record_success(integration, runtime: runtime) }
           rescue StandardError => e
             record_failure(integration, e, runtime: runtime, component: component, action: action, **metadata)
-            nil
           end
 
           def scoped(integration, runtime: nil)

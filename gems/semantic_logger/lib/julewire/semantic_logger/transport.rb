@@ -6,7 +6,7 @@ module Julewire
   module SemanticLogger
     class Transport
       LOGGER_NAME = "julewire"
-      DEFAULT_MAX_QUEUE_SIZE = 10_000
+      DEFAULT_MAX_QUEUE_SIZE = AsyncOptions::DEFAULT_MAX_QUEUE_SIZE
       LEVEL_MAP = {
         # SemanticLogger has no unknown level; fatal keeps unknown core records visible.
         unknown: :fatal
@@ -15,14 +15,11 @@ module Julewire
 
       def initialize(**options)
         @mutex = Mutex.new
-        @async = options.delete(:async) { false }
-        @max_queue_size = options.delete(:max_queue_size) { DEFAULT_MAX_QUEUE_SIZE }
-        @lag_check_interval = options.delete(:lag_check_interval) { 1_000 }
-        @lag_threshold_s = options.delete(:lag_threshold_s) { 30 }
-        @write_count = 0
-        @failure_count = 0
-        @degraded = false
-        @closed = false
+        @async = options.delete(:async)
+        @async_options = AsyncOptions.extract(options)
+        @async = @async_options.async?(@async)
+        @max_queue_size = @async_options.max_queue_size
+        @health = Core::Integration::DestinationHealth.new(counter_keys: %i[writes])
         @appenders = build_appenders(
           appenders: options.delete(:appenders),
           appender: options.delete(:appender),
@@ -35,62 +32,50 @@ module Julewire
       end
 
       def write(value, severity:)
+        degradation_marker = @health.degradation_marker
         log = log_for(value, severity: severity)
-        @mutex.synchronize do
-          @write_count += 1
-          # Synchronous appenders write under our mutex; async appenders own
-          # queue synchronization and may block on bounded queues.
-          appender.log(log) unless @async
-        end
+        @health.increment(:writes)
+        @mutex.synchronize { appender.log(log) } unless @async
         appender.log(log) if @async
-        clear_degraded
-        nil
-      rescue StandardError
-        @mutex.synchronize do
-          @failure_count += 1
-          @degraded = true
-        end
+        @health.clear_degradation_if_unchanged(degradation_marker)
+      rescue StandardError => e
+        @health.record_failure(e)
         raise
       end
 
       def flush
-        appender.flush if appender.respond_to?(:flush)
-        clear_degraded
+        degradation_marker = @health.degradation_marker
+        appender.flush
+        @health.clear_degradation_if_unchanged(degradation_marker)
         nil
       end
 
       def close
-        appender.close if appender.respond_to?(:close)
-        @mutex.synchronize { @closed = true }
+        appender.close
+        @closed = true
         nil
       end
 
       def reopen
+        degradation_marker = @health.degradation_marker
         appender.reopen if appender.respond_to?(:reopen)
-        @mutex.synchronize do
-          @closed = false
-          @degraded = false
-        end
+        @closed = false
+        @health.clear_degradation_if_unchanged(degradation_marker)
         nil
       end
 
       def after_fork! = reopen
 
       def health
-        counts = @mutex.synchronize do
-          {
-            closed: @closed,
-            degraded: @degraded,
-            failures: @failure_count,
-            writes: @write_count
-          }
-        end
+        snapshot = @health.snapshot(status: status)
+        counts = snapshot.fetch(:counts)
 
         {
           type: "semantic_logger",
-          status: status(counts),
+          status: snapshot.fetch(:status),
           async: @async,
           warnings: lifecycle_warnings,
+          last_failure: snapshot[:last_failure],
           counts: {
             writes: counts.fetch(:writes),
             failures: counts.fetch(:failures)
@@ -140,12 +125,7 @@ module Julewire
       def build_transport_appender(sink)
         return sink unless @async
 
-        ::SemanticLogger::Appender::Async.new(
-          appender: sink,
-          lag_check_interval: @lag_check_interval,
-          lag_threshold_s: @lag_threshold_s,
-          max_queue_size: @max_queue_size
-        )
+        @async_options.build_appender(sink)
       end
 
       def log_for(value, severity:)
@@ -159,23 +139,20 @@ module Julewire
       end
 
       def semantic_level(value)
-        level = value.is_a?(Symbol) ? value : value.to_s.downcase.to_sym
-        level = LEVEL_MAP.fetch(level, level)
+        level = LEVEL_MAP.fetch(value, value)
         return level if LEVEL_SET.key?(level)
 
         :info
       end
 
-      def status(counts)
-        return :closed if counts.fetch(:closed)
-        return :degraded if appender.is_a?(::SemanticLogger::Appender::Async) && !appender.active?
-        return :degraded if counts.fetch(:degraded)
+      def status
+        return :closed if @closed
 
-        :ok
+        :degraded if async_appender_inactive?
       end
 
-      def clear_degraded
-        @mutex.synchronize { @degraded = false }
+      def async_appender_inactive?
+        @async && !appender.active?
       end
 
       def lifecycle_warnings

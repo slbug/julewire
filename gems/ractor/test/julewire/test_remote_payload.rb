@@ -5,34 +5,39 @@ require "test_helper"
 module Julewire
   class TestRactorRemotePayload < Minitest::Test
     cover Julewire::Ractor::RemotePayload
+    cover "Julewire::Ractor::RemotePayload.hash_value"
+    cover "Julewire::Ractor::RemotePayload.scope_snapshot"
 
-    class HashSubclass < Hash
-    end
-
-    def test_extracts_input_and_sections_from_string_keys
+    def test_extracts_symbol_keyed_owned_sections
       payload = Julewire::Ractor::RemotePayload.extract(
-        "input" => "done",
-        "context" => { "request_id" => "r1" },
-        "neutral" => { "messaging.system" => "kafka" },
-        "attributes" => { "ractor" => { "child" => true } },
-        "carry" => { "traceparent" => "trace-1" }
+        input: { message: "done" },
+        context: { request_id: "r1" },
+        neutral: { "messaging.system": "kafka" },
+        attributes: { ractor: { child: true } },
+        carry: { traceparent: "trace-1" },
+        scope: { execution: {}, neutral: {}, attributes: {}, carry: {}, labels: {} }
       )
 
-      assert_equal "done", payload.fetch(:input)
+      assert_equal({ message: "done" }, payload.fetch(:input))
       assert_equal({ request_id: "r1" }, payload.fetch(:context))
       assert_equal({ "messaging.system": "kafka" }, payload.fetch(:neutral))
       assert_equal({ ractor: { child: true } }, payload.fetch(:attributes))
       assert_equal({ traceparent: "trace-1" }, payload.fetch(:carry))
     end
 
-    def test_extracts_scope_snapshot_from_string_keys
+    def test_extracts_owned_scope_snapshot
       payload = Julewire::Ractor::RemotePayload.extract(
-        "scope" => {
-          "execution" => { "type" => "ractor", "id" => "child-1" },
-          "neutral" => { "messaging.system" => "kafka" },
-          "attributes" => { "ractor" => { "child" => true } },
-          "carry" => { "traceparent" => "trace-1" },
-          "labels" => { "worker" => "child" }
+        input: {},
+        context: {},
+        neutral: {},
+        attributes: {},
+        carry: {},
+        scope: {
+          execution: { type: "ractor", id: "child-1" },
+          neutral: { "messaging.system": "kafka" },
+          attributes: { ractor: { child: true } },
+          carry: { traceparent: "trace-1" },
+          labels: { worker: "child" }
         }
       )
       scope = payload.fetch(:scope)
@@ -45,83 +50,48 @@ module Julewire
       assert_equal({ worker: "child" }, scope.labels_hash)
     end
 
-    def test_rejects_non_hash_payloads_and_sections
-      payload = Julewire::Ractor::RemotePayload.extract(
-        "context" => "bad",
-        "neutral" => nil,
-        "attributes" => [],
-        "carry" => Object.new,
-        "scope" => "bad"
-      )
+    def test_rejects_malformed_protocol_instead_of_defaulting_sections
+      valid = valid_payload
 
-      assert_equal({}, payload.fetch(:input))
-      assert_equal({}, payload.fetch(:context))
-      assert_equal({}, payload.fetch(:neutral))
-      assert_equal({}, payload.fetch(:attributes))
-      assert_equal({}, payload.fetch(:carry))
-      assert_empty payload.fetch(:scope).execution_hash
-
-      invalid_payload = Julewire::Ractor::RemotePayload.extract("not a hash")
-
-      assert_equal({}, invalid_payload.fetch(:input))
-      assert_equal({}, invalid_payload.fetch(:context))
-      assert_equal({}, invalid_payload.fetch(:carry))
+      assert_raises(TypeError) { Julewire::Ractor::RemotePayload.extract("not a hash") }
+      assert_raises(KeyError) { Julewire::Ractor::RemotePayload.extract(valid.except(:context)) }
+      assert_raises(TypeError) { Julewire::Ractor::RemotePayload.extract(valid.merge(context: [])) }
+      assert_raises(TypeError) { Julewire::Ractor::RemotePayload.extract(valid.merge("context" => {})) }
+      assert_raises(TypeError) do
+        Julewire::Ractor::RemotePayload.extract(valid.merge(context: { "request_id" => "r1" }))
+      end
     end
 
-    def test_accepts_hash_subclass_sections
-      payload_hash = HashSubclass.new
-      input = HashSubclass.new
-      input["message"] = "done"
-      payload_hash["input"] = input
-      context = HashSubclass.new
-      context["request_id"] = "r1"
-      payload_hash[:context] = context
-
-      payload = Julewire::Ractor::RemotePayload.extract(payload_hash)
-
-      assert_equal({ message: "done" }, payload.fetch(:input))
-      assert_equal({ request_id: "r1" }, payload.fetch(:context))
-    end
-
-    def test_extract_normalizes_hash_input_as_owned_bridge_payload
+    def test_preserves_owned_truncation_metadata
       payload = Julewire::Ractor::RemotePayload.extract(
-        "input" => {
-          "message" => "done",
-          "_julewire_truncation" => {
-            "truncated" => true,
-            "truncated_fields" => ["message"],
-            "limits" => { "max_string_bytes" => 16 }
+        valid_payload.merge(
+          context: {
+            _julewire_truncation: {
+              truncated: true,
+              truncated_fields: ["blob"],
+              limits: { max_string_bytes: 16_384 }
+            }
           }
-        }
+        )
       )
-
-      assert_equal "done", payload.dig(:input, :message)
-      assert_equal ["message"], payload.dig(:input, :_julewire_truncation, :truncated_fields)
-    end
-
-    def test_extract_preserves_scalar_input_without_field_bag_normalization
-      message = ("x" * (Julewire::Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES + 1)).freeze
-      payload = Julewire::Ractor::RemotePayload.extract("input" => message)
-
-      assert_same message, payload.fetch(:input)
-    end
-
-    def test_extract_preserves_owned_truncation_metadata
-      payload = Julewire::Ractor::RemotePayload.extract(
-        "context" => {
-          "_julewire_truncation" => {
-            "truncated" => true,
-            "truncated_fields" => ["blob"],
-            "limits" => { "max_string_bytes" => 16_384 }
-          }
-        }
-      )
-
       metadata = payload.dig(:context, :_julewire_truncation)
 
-      assert metadata.fetch(:truncated)
+      assert_true metadata.fetch(:truncated)
       assert_equal ["blob"], metadata.fetch(:truncated_fields)
       assert_equal 16_384, metadata.dig(:limits, :max_string_bytes)
+    end
+
+    private
+
+    def valid_payload
+      {
+        input: {},
+        context: {},
+        neutral: {},
+        attributes: {},
+        carry: {},
+        scope: { execution: {}, neutral: {}, attributes: {}, carry: {}, labels: {} }
+      }
     end
   end
 end

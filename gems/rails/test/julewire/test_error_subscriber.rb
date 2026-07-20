@@ -5,7 +5,7 @@ require "test_helper"
 module Julewire
   class TestErrorSubscriber < Minitest::Test
     cover Julewire::Rails::Subscribers::Error
-
+    cover Julewire::Rails::RequestErrorOwnership
     def test_error_subscriber_emits_rails_error_reports
       output = configure_output
       subscriber = Julewire::Rails::Subscribers::Error.new
@@ -25,16 +25,13 @@ module Julewire
       assert_equal "Rails.error", record.fetch("logger")
       assert_equal "rails", record.fetch("source")
       assert_equal "req-1", record.dig("context", "request_id")
-      assert record.dig("attributes", "rails", "handled")
+      assert_true record.dig("attributes", "rails", "handled")
       assert_equal "application.test", record.dig("attributes", "rails", "source")
       assert_equal "RuntimeError", record.dig("error", "class")
-      assert_julewire_record_source_contract(
-        records: [record],
-        event: "rails.error",
-        source: "rails",
-        logger: "Rails.error",
-        kind: "point"
-      )
+      assert_equal "rails.error", record.fetch("event")
+      assert_equal "rails", record.fetch("source")
+      assert_equal "Rails.error", record.fetch("logger")
+      assert_equal "point", record.fetch("kind")
     end
 
     def test_error_subscriber_error_field_uses_core_exception_shape
@@ -49,6 +46,19 @@ module Julewire
       assert_equal "root", record.dig("error", "cause", "message")
     end
 
+    def test_error_subscriber_success_recovers_integration_health
+      output = configure_output
+      subscriber = Julewire::Rails::Subscribers::Error.new
+      Julewire::Rails::IntegrationHealth.record_failure(RuntimeError.new("old"), component: :error_subscriber)
+
+      report_error(subscriber)
+
+      assert_equal 1, parse_records(output).size
+      assert_equal :ok, Julewire.health.dig(:process_integrations, :rails, :status)
+    ensure
+      Julewire::Core::Diagnostics::ProcessIntegrationHealth.reset!
+    end
+
     def test_error_subscriber_respects_disabled_configuration
       output = configure_output
       configuration = Julewire::Rails::Configuration.new
@@ -58,6 +68,41 @@ module Julewire
       report_error(subscriber)
 
       assert_empty parse_records(output)
+    end
+
+    def test_error_subscriber_does_not_report_while_suppressed
+      output = configure_output
+      subscriber = Julewire::Rails::Subscribers::Error.new
+
+      Julewire::Rails::Suppression.suppress do
+        report_error(subscriber)
+      end
+
+      assert_empty parse_records(output)
+    end
+
+    def test_error_subscriber_accepts_string_warning_severity
+      output = configure_output
+      subscriber = Julewire::Rails::Subscribers::Error.new
+
+      report_error(subscriber, severity: "warning")
+
+      assert_equal "warn", parse_records(output).fetch(0).fetch("severity")
+    end
+
+    def test_error_subscriber_uses_top_level_core_namespace
+      output = configure_output
+      shadow = Module.new do
+        def self.const_missing(_name)
+          raise "shadow Core namespace used"
+        end
+      end
+
+      with_constant(Julewire::Rails, :Core, shadow) do
+        report_error(Julewire::Rails::Subscribers::Error.new, context: { request_id: "req-1" })
+      end
+
+      assert_equal "req-1", parse_records(output).fetch(0).dig("context", "request_id")
     end
 
     def test_error_subscriber_skips_request_owned_dispatch_reports
@@ -75,6 +120,29 @@ module Julewire
       )
 
       assert_empty parse_records(output)
+    ensure
+      Julewire::Rails::RequestErrorOwnership.clear
+    end
+
+    def test_error_subscriber_only_consumes_request_owned_errors_for_dispatch_source
+      output = configure_output
+      subscriber = Julewire::Rails::Subscribers::Error.new
+      error = RuntimeError.new("owned")
+
+      Julewire::Rails::RequestErrorOwnership.mark(error)
+      report_error(subscriber, error, source: "application.test")
+      subscriber.report(
+        error,
+        handled: false,
+        severity: :error,
+        context: { request_id: "req-1" },
+        source: "application.action_dispatch"
+      )
+
+      records = parse_records(output)
+
+      assert_equal 1, records.size
+      assert_equal "application.test", records.fetch(0).dig("attributes", "rails", "source")
     ensure
       Julewire::Rails::RequestErrorOwnership.clear
     end
@@ -165,8 +233,8 @@ module Julewire
       record = parse_records(output).fetch(0)
 
       assert_equal "info", record.fetch("severity")
-      refute record.key?("context")
-      refute record.dig("attributes", "rails", "handled")
+      assert_false record.key?("context")
+      assert_false record.dig("attributes", "rails", "handled")
 
       next_configuration = Julewire::Rails::Configuration.new
       next_configuration.error_reports = false
@@ -182,27 +250,69 @@ module Julewire
       Julewire::Rails::Subscribers::Error.reset!
     end
 
+    def test_error_subscriber_install_subscribes_to_current_rails_error_reporter
+      Julewire::Rails::Subscribers::Error.reset!
+      reporter = Object.new
+      subscriptions = []
+      unsubscriptions = []
+      reporter.define_singleton_method(:subscribe) { |subscriber| subscriptions << subscriber }
+      reporter.define_singleton_method(:unsubscribe) { unsubscriptions << it }
+
+      with_overridden_singleton_method(::Rails, :error, proc { reporter }) do
+        with_shadowed_nested_rails_support do
+          subscriber = Julewire::Rails::Subscribers::Error.install!(Julewire::Rails::Configuration.new)
+
+          assert_instance_of Julewire::Rails::Subscribers::Error, subscriber
+          assert_predicate Julewire::Rails::Subscribers::Error, :installed?
+          assert_equal [subscriber], subscriptions
+
+          Julewire::Rails::Subscribers::Error.reset!
+
+          assert_equal [subscriber], unsubscriptions
+        end
+      end
+    ensure
+      Julewire::Rails::Subscribers::Error.reset!
+    end
+
+    def test_error_subscriber_install_skips_non_subscribable_reporter
+      Julewire::Rails::Subscribers::Error.reset!
+      reporter = Object.new
+
+      with_overridden_singleton_method(::Rails, :error, proc { reporter }) do
+        with_shadowed_nested_rails_support do
+          assert_nil Julewire::Rails::Subscribers::Error.install!(Julewire::Rails::Configuration.new)
+        end
+      end
+
+      refute_predicate Julewire::Rails::Subscribers::Error, :installed?
+    ensure
+      Julewire::Rails::Subscribers::Error.reset!
+    end
+
     def test_error_subscriber_records_adapter_failures
       subscriber = Julewire::Rails::Subscribers::Error.new
       bad_context = Object.new
       bad_context.define_singleton_method(:is_a?) { |_class| raise "bad context" }
 
-      _health, integration = assert_julewire_integration_failure_contract(
-        integration: :rails,
-        component: :error_subscriber,
-        exercise: lambda do
-          subscriber.report(
-            RuntimeError.new("boom"),
-            handled: true,
-            severity: :error,
-            context: bad_context,
-            source: "application.test"
-          )
-        end
+      assert_nil subscriber.report(
+        RuntimeError.new("boom"),
+        handled: true,
+        severity: :error,
+        context: bad_context,
+        source: "application.test"
       )
 
+      health = Julewire.health
+      integration = health.dig(:process_integrations, :rails)
+
+      assert_equal :degraded, health.fetch(:status)
+      assert_equal :degraded, integration.fetch(:status)
+      assert_equal 1, integration.dig(:counts, :failures)
+      assert_equal :error_subscriber, integration.dig(:last_failure, :component)
       assert_equal :report, integration.dig(:last_failure, :action)
       assert_equal "RuntimeError", integration.dig(:last_failure, :class)
+      refute_includes integration.fetch(:last_failure), :message
     end
 
     def test_error_subscriber_normalizes_controller_context_objects
@@ -222,6 +332,16 @@ module Julewire
       assert_equal "show", record.dig("context", "action")
     end
 
+    def test_error_subscriber_normalizes_anonymous_controller_context_objects
+      output = configure_output
+      subscriber = Julewire::Rails::Subscribers::Error.new
+      controller = Class.new.new
+
+      report_error(subscriber, context: { controller: controller })
+
+      assert_equal controller.to_s, parse_records(output).fetch(0).dig("context", "controller")
+    end
+
     def test_error_subscriber_keeps_string_controller_context
       output = configure_output
       subscriber = Julewire::Rails::Subscribers::Error.new
@@ -229,6 +349,18 @@ module Julewire
       report_error(subscriber, context: { controller: "StringController" })
 
       assert_equal "StringController", parse_records(output).fetch(0).dig("context", "controller")
+    end
+
+    def test_error_subscriber_keeps_string_subclass_controller_context
+      output = configure_output
+      subscriber = Julewire::Rails::Subscribers::Error.new
+      controller_class = Class.new(String)
+
+      with_constant(Julewire, :StringSubclassControllerForTest, controller_class) do
+        report_error(subscriber, context: { controller: controller_class.new("StringSubclassController") })
+      end
+
+      assert_equal "StringSubclassController", parse_records(output).fetch(0).dig("context", "controller")
     end
 
     private

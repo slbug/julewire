@@ -4,10 +4,8 @@ module Julewire
   module Core
     module Execution
       class ScopeSnapshot
-        EMPTY_HASH = {}.freeze
-        private_constant :EMPTY_HASH
-
-        def initialize(execution: {}, carry: {}, attributes: {}, labels: {}, neutral: {}, lineage: nil)
+        def initialize(execution: {}, carry: {}, attributes: {}, labels: {}, neutral: {}, lineage: nil, owned: false)
+          @owned = owned
           @execution = normalized_hash(execution)
           @carry = normalized_hash(carry)
           @attributes = normalized_hash(attributes)
@@ -17,11 +15,11 @@ module Julewire
         end
 
         def execution_hash
-          Fields::FieldSet.deep_dup(frozen_execution_hash)
+          Fields::FieldSet.deep_dup_owned(frozen_execution_hash)
         end
 
         def frozen_execution_hash
-          @frozen_execution_hash ||= Fields::Internal.frozen_copy(@execution)
+          @frozen_execution_hash ||= Fields::Internal.frozen_owned_copy(@execution)
         end
 
         attr_reader :lineage
@@ -30,61 +28,42 @@ module Julewire
 
         def type = @execution[:type]
 
-        def started_at = nil
+        def started_at; end
 
-        def finished_at = nil
+        def finished_at; end
 
-        def parent = nil
+        def parent; end
 
         def context_hash = {}
 
-        def carry_hash
-          return {} if @carry.empty?
+        def carry_hash = Fields::FieldSet.deep_dup_owned(@carry)
 
-          Fields::FieldSet.deep_dup(@carry)
-        end
+        def attributes_hash = Fields::FieldSet.deep_dup_owned(@attributes)
 
-        def attributes_hash
-          return {} if @attributes.empty?
+        def neutral_hash = Fields::FieldSet.deep_dup_owned(@neutral)
 
-          Fields::FieldSet.deep_dup(@attributes)
-        end
-
-        def neutral_hash
-          return {} if @neutral.empty?
-
-          Fields::FieldSet.deep_dup(@neutral)
-        end
-
-        def labels_hash
-          return {} if @labels.empty?
-
-          Fields::FieldSet.deep_dup(@labels)
-        end
+        def labels_hash = Fields::FieldSet.deep_dup_owned(@labels)
 
         def summary_hash = {}
 
         def metrics_hash = {}
 
-        def frozen_labels_hash
-          return EMPTY_HASH if @labels.empty?
-
-          @frozen_labels_hash ||= Fields::Internal.frozen_copy(@labels)
-        end
+        def frozen_labels_hash = (@frozen_labels_hash ||= Fields::Internal.frozen_owned_copy(@labels))
 
         def execution_reference_for_child
           reference = {}
-          reference[:type] = @execution[:type] if @execution.key?(:type)
-          reference[:id] = @execution[:id] if @execution.key?(:id)
-          reference.empty? ? nil : Fields::Internal.frozen_copy(reference)
+          reference[:type] = @execution.fetch(:type) if @execution.key?(:type)
+          reference[:id] = @execution.fetch(:id) if @execution.key?(:id)
+          Fields::Internal.frozen_copy(reference) unless reference.empty?
         end
 
         private
 
         def normalized_hash(value)
-          return EMPTY_HASH if value.is_a?(Hash) && value.empty?
+          return Fields::FieldSet.deep_symbolize_keys(value) unless @owned
 
-          Fields::FieldSet.deep_symbolize_keys(value)
+          Serialization::DeepFreeze.validate_symbol_hash(value)
+          Fields::FieldSet.deep_dup_owned(value)
         end
       end
     end

@@ -29,6 +29,12 @@ Values are serialized before crossing the ractor boundary. Parent-side
 processors see log-safe scalar values rather than the child object's original
 identity or class.
 
+The child public facade canonicalizes application input, including nested
+String keys and unknown top-level payload fields, before strict bridge
+serialization. Integration facade emits use a separate owned path: every key
+must already be a Symbol and unknown record fields are rejected. The serializer
+never decides which contract applies and never normalizes bridge data.
+
 The serialized envelope is a ractor concern. Core keeps only the narrow
 `emit_envelope` hook that accepts already-extracted input, context, carry, and
 a scope snapshot. Payload parsing and scope reconstruction stay in this gem.
@@ -106,15 +112,28 @@ synchronously. The destination then sends each immutable record to a worker
 ractor. The worker owns formatter, encoder, byte-limit checks, and output
 writes.
 
+All hashes exchanged between Julewire gems, the parent bridge, and worker
+ractors use Symbol keys at every depth. This is an internal protocol, not an
+input-normalization boundary: String keys and malformed or unknown commands are
+protocol errors. They are raised and recorded at the owning bridge/worker
+lifecycle boundary instead of being converted, ignored, or replaced with empty
+values. String-key normalization remains limited to public application input
+and decoded propagation carriers.
+
 The destination has a bounded parent-side in-flight queue. When `max_queue` is
 full, new records are dropped and counted in destination health. `flush` sends a
 request to the worker and waits for all earlier records to finish. `close`
 flushes or closes the worker-owned output and stops the worker.
 
-Unlike direct core destinations, ractor-backed destinations treat
-`flush(timeout: nil)` and `close(timeout: nil)` as the configured request timeout
-instead of an unbounded wait. Worker ractors can die or stop replying; the parent
-must not park forever while draining diagnostics.
+Unlike direct core destinations, ractor-backed destinations require a finite
+configured request timeout. `flush(timeout: nil)` and `close(timeout: nil)` use
+that configured timeout instead of creating an unbounded wait. Worker ractors
+can die or stop replying; the parent observes worker termination as well as the
+reply and must not park forever while draining diagnostics.
+
+Worker startup has a fixed one-second bound, independent of the request timeout.
+A worker that does not hand back its command port raises
+`Julewire::Core::Error` instead of blocking construction.
 
 Formatter, encoder, and output must be ractor-copyable or shareable. Avoid
 singleton-method/proc-backed output objects; plain class instances with

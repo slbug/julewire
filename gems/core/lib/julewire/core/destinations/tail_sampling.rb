@@ -29,7 +29,8 @@ module Julewire
           slow_ms
         ].freeze
         private_constant :COUNTER_KEYS, :ERROR_RANK, :OPTION_KEYS
-
+        Sampling = Processing::Sampling
+        private_constant :Sampling
         TailOptions = Data.define(:decider, :max_executions, :max_records_per_execution, :name, :on_drop, :on_failure,
                                   :sample_rate, :slow_ms)
         private_constant :TailOptions
@@ -42,7 +43,7 @@ module Julewire
           @destination = Registry.validate!(destination)
           @name = Destinations.normalize_name(options.name)
           @sample_rate = options.sample_rate
-          Processing::Sampling.threshold_for(options.sample_rate)
+          Sampling.threshold_for(options.sample_rate)
           @slow_ms = validate_slow_ms(options.slow_ms)
           @max_executions = Validation.validate_integer_limit!(
             options.max_executions,
@@ -65,7 +66,7 @@ module Julewire
 
         def emit(record)
           result = @mutex.synchronize { accept_record(record) }
-          result.losses.compact.each { notify_drop(it) }
+          result.losses.each { notify_drop(it) }
           result.records.each { emit_target(it) }
           nil
         rescue StandardError => e
@@ -160,7 +161,7 @@ module Julewire
             @order << key
             Buffer.new([])
           end)
-          if buffer.records.length >= @max_records_per_execution
+          if buffer.records.length == @max_records_per_execution
             dropped = buffer.records.shift
             losses << record_loss(:overflow_dropped, dropped)
           end
@@ -174,8 +175,7 @@ module Julewire
           return [] if @buffers.length < @max_executions
 
           oldest = @order.shift
-          buffer = @buffers.delete(oldest)
-          Array(buffer&.records).map { record_loss(:overflow_dropped, it) }
+          @buffers.delete(oldest).records.map { record_loss(:overflow_dropped, it) }
         end
 
         def finish_execution(key, summary)
@@ -205,7 +205,7 @@ module Julewire
         end
 
         def keep_execution?(record, key)
-          return !!@decider.call(record, key: key) if @decider
+          return @decider.call(record, key: key) if @decider
 
           default_keep_execution?(record, key)
         rescue StandardError => e
@@ -214,7 +214,7 @@ module Julewire
         end
 
         def default_keep_execution?(record, key)
-          error_record?(record) || slow_record?(record) || Processing::Sampling.keep?(rate: @sample_rate, key: key)
+          error_record?(record) || slow_record?(record) || Sampling.keep?(rate: @sample_rate, key: key)
         end
 
         def error_record?(record)
@@ -235,7 +235,7 @@ module Julewire
         def summary_record?(record) = record[:kind] == :summary
 
         def execution_key(record)
-          reference = record.respond_to?(:lineage) ? record.lineage.root_reference : nil
+          reference = record.lineage.root_reference if record.respond_to?(:lineage)
           reference = record[:execution] unless reference.is_a?(Hash)
           id = field_value(reference, :id)
           return unless id
@@ -256,7 +256,7 @@ module Julewire
         end
 
         def lifecycle(method_name, timeout:)
-          @destination.public_send(method_name, timeout: timeout) != false
+          !@destination.public_send(method_name, timeout: timeout).eql?(false)
         rescue StandardError => e
           record_failure(e, nil, phase: :tail_sampling_lifecycle, action: method_name)
           false
@@ -270,8 +270,6 @@ module Julewire
 
         def record_loss(reason, record)
           @health.record_loss(reason: reason, record_metadata: Records::Metadata.call(record))
-        rescue StandardError => e
-          record_failure(e, record, phase: :tail_sampling_drop)
         end
 
         def notify_drop(loss)
@@ -281,29 +279,22 @@ module Julewire
         end
 
         def record_failure(error, record, phase: :tail_sampling, **metadata)
-          failure_metadata = if @mutex.owned?
-                               record_failure_state(error, record, phase: phase, **metadata)
-                             else
-                               @mutex.synchronize { record_failure_state(error, record, phase: phase, **metadata) }
-                             end
-          @on_failure&.call(error, **failure_metadata)
+          failure_metadata = record_failure_state(error, record, phase: phase, **metadata)
+          @on_failure.call(error, **failure_metadata)
         rescue StandardError
           nil
         end
 
         def record_failure_state(error, record, phase:, **metadata)
-          @health.record_failure(
-            error,
-            **metadata,
-            destination: @name,
-            phase: phase,
-            record_metadata: record ? Records::Metadata.call(record) : nil
-          )
-          metadata.merge(destination: @name, phase: phase)
+          metadata = metadata.merge(destination: @name, phase: phase)
+          record_metadata = record && Records::Metadata.call(record)
+          metadata[:record_metadata] = record_metadata if record_metadata
+          @health.record_failure(error, **metadata)
+          metadata
         end
 
         def health_status
-          return :degraded if @health.last_failure || @health.last_loss&.fetch(:reason) == :overflow_dropped
+          return if @health.last_failure || @health.last_loss&.fetch(:reason) == :overflow_dropped
 
           :ok
         end

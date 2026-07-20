@@ -1,0 +1,22 @@
+---
+usage: opensource
+includes:
+- lib
+- test
+- "../../support/mutant"
+requires:
+- mutant
+- ruby_itblock
+- minitest_coverage
+- julewire-rails
+- generators/julewire/install_generator
+hooks:
+- "../../support/mutant/zeitwerk_eager_load.rb"
+integration:
+  name: minitest
+coverage_criteria:
+  process_abort: true
+matcher:
+  subjects:
+  - Julewire::Generators*
+  - Julewire::Rails*

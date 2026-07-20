@@ -1,19 +1,21 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "prism"
 
 module Julewire
   class TestRecordPublicSurface < Minitest::Test
     cover Julewire::Core::Records::Record
-    cover Julewire::Core::Execution::Lineage
-    cover Julewire::Core::Serialization::ValueCopy
+    cover Julewire::Core::Records::Draft
+    cover "Julewire::Core::Records::Draft::Builder*"
+    cover Julewire::Core::Records::PublicProjection
 
     def test_record_public_readers_delegate_to_normalized_data
       input = normalized_record(message: "hello", payload: { id: 1 }, metrics: { duration_ms: 3 })
       record = Julewire::Core::Records::Record.from_normalized_hash(input)
 
-      assert record.key?(:payload)
-      refute record.key?(:missing)
+      assert_true record.key?(:payload)
+      assert_false record.key?(:missing)
       assert_equal "hello", record.message
       assert_equal :info, record.fetch(:severity)
       assert_equal 1, record.dig(:payload, :id)
@@ -25,7 +27,7 @@ module Julewire
     def test_record_shape_docs_match_bag_taxonomy
       docs = File.read(File.expand_path("../../docs/records-and-data-policy.md", __dir__))
       body = docs.match(/canonical symbol-key shape is:\n\n```ruby\n(?<body>.*?)\n```/m)[:body]
-      documented_keys = body.scan(/^\s{2}([a-z_]+):/).flatten.map(&:to_sym)
+      documented_keys = documented_record_keys(body)
 
       assert_equal Julewire::Core::Fields::Bags.required_record_keys, documented_keys
     end
@@ -101,7 +103,7 @@ module Julewire
 
       assert_same lineage, record.lineage
       assert_predicate lineage, :frozen?
-      refute record.fetch(:execution).key?(:ancestors)
+      assert_false record.fetch(:execution).key?(:ancestors)
       assert_equal 3, record.lineage.depth
       assert_equal [{ type: "request", id: "root" }], record.lineage.ancestors
     end
@@ -122,8 +124,8 @@ module Julewire
       assert_predicate record.lineage, :truncated?
       assert_equal "job", record.dig(:execution, :type)
       assert_equal "child", record.dig(:execution, :id)
-      refute record.fetch(:execution).key?(:ancestors)
-      refute record.fetch(:execution).key?(:ancestors_truncated)
+      assert_false record.fetch(:execution).key?(:ancestors)
+      assert_false record.fetch(:execution).key?(:ancestors_truncated)
     end
 
     def test_record_from_normalized_hash_cleans_hash_subclass_lineage_keys
@@ -136,7 +138,81 @@ module Julewire
       record = Julewire::Core::Records::Record.from_normalized_hash(input)
 
       assert_equal [{ type: "request", id: "root" }], record.lineage.ancestors
-      refute record.fetch(:execution).key?(:ancestors)
+      assert_false record.fetch(:execution).key?(:ancestors)
+    end
+
+    def test_draft_from_normalized_hash_rejects_non_hash_values
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Draft.from_normalized_hash("not a record")
+      end
+
+      assert_equal "record must be a normalized Hash", error.message
+    end
+
+    def test_draft_from_normalized_hash_duplicates_input_and_derives_lineage_before_cleanup
+      input = normalized_record(
+        execution: {
+          type: "job",
+          id: "child",
+          ancestors: [{ type: "request", id: "root" }],
+          ancestors_truncated: true
+        },
+        payload: { ids: ["one"] }
+      )
+
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(input)
+
+      assert_true input.fetch(:execution).key?(:ancestors)
+      assert_true input.fetch(:execution).key?(:ancestors_truncated)
+      assert_false draft.fetch(:execution).key?(:ancestors)
+      assert_false draft.fetch(:execution).key?(:ancestors_truncated)
+      assert_equal [{ type: "request", id: "root" }], draft.lineage.ancestors
+      assert_predicate draft.lineage, :truncated?
+      refute_same input.fetch(:payload), draft.fetch(:payload)
+      refute_predicate draft.fetch(:payload), :frozen?
+    end
+
+    def test_draft_from_normalized_hash_preserves_explicit_lineage
+      lineage = Julewire::Core::Execution::Lineage.new(
+        reference: { type: "job", id: "child" },
+        root_reference: { type: "request", id: "root" },
+        parent_reference: { type: "job", id: "parent" },
+        depth: 3
+      )
+
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(
+        normalized_record(execution: { type: "job", id: "child", ancestors: [{ id: "stale" }] }),
+        lineage: lineage
+      )
+
+      assert_same lineage, draft.lineage
+      assert_false draft.fetch(:execution).key?(:ancestors)
+      assert_equal 3, draft.lineage.depth
+    end
+
+    def test_draft_from_normalized_hash_owns_mutable_sections
+      input = normalized_record(payload: { ids: ["one"] })
+
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(input)
+
+      refute_same input.fetch(:payload), draft.fetch(:payload)
+      refute_predicate draft.fetch(:payload), :frozen?
+      draft.fetch(:payload).fetch(:ids) << "two"
+
+      assert_equal ["one"], input.dig(:payload, :ids)
+      assert_equal %w[one two], draft.dig(:payload, :ids)
+    end
+
+    def test_draft_from_normalized_hash_finalizes_shallow_frozen_nested_input_defensively
+      unfrozen_child = ["one"]
+      frozen_parent = { child: unfrozen_child }.freeze
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(
+        normalized_record(payload: { frozen_parent: frozen_parent })
+      )
+
+      record = draft.to_record
+
+      assert_predicate record.dig(:payload, :frozen_parent, :child), :frozen?
     end
 
     def test_record_from_owned_hash_cleans_lazy_lineage_keys_in_place
@@ -154,8 +230,8 @@ module Julewire
       record = Julewire::Core::Records::Record.from_owned_hash(input)
 
       assert_same input, record.serializable_data
-      refute input.fetch(:execution).key?(:ancestors)
-      refute input.fetch(:execution).key?(:ancestors_truncated)
+      assert_false input.fetch(:execution).key?(:ancestors)
+      assert_false input.fetch(:execution).key?(:ancestors_truncated)
       assert_equal [{ type: "request", id: "root" }], record.lineage.ancestors
       assert_predicate record.fetch(:payload), :frozen?
     end
@@ -169,7 +245,7 @@ module Julewire
 
       assert_same input, record.serializable_data
       assert_equal [{ id: "root" }], record.lineage.ancestors
-      refute record.fetch(:execution).key?(:ancestors)
+      assert_false record.fetch(:execution).key?(:ancestors)
     end
 
     def test_record_from_owned_hash_does_not_mutate_frozen_input
@@ -179,9 +255,9 @@ module Julewire
 
       record = Julewire::Core::Records::Record.from_owned_hash(input)
 
-      assert input.fetch(:execution).key?(:ancestors)
+      assert_true input.fetch(:execution).key?(:ancestors)
       refute_same input, record.serializable_data
-      refute record.fetch(:execution).key?(:ancestors)
+      assert_false record.fetch(:execution).key?(:ancestors)
     end
 
     def test_record_from_owned_hash_rejects_non_hash_values
@@ -190,6 +266,16 @@ module Julewire
       end
 
       assert_equal "record must be a normalized Hash", error.message
+    end
+
+    def test_record_from_owned_hash_rejects_nested_string_keys
+      input = normalized_record(payload: { nested: { "bad" => true } })
+
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Record.from_owned_hash(input)
+      end
+
+      assert_equal "record must not use string keys", error.message
     end
 
     def test_record_from_owned_hash_default_freezes_children_inside_frozen_sections
@@ -211,6 +297,13 @@ module Julewire
 
       assert_same payload, record.fetch(:payload)
       refute_predicate ids, :frozen?
+    end
+
+    private
+
+    def documented_record_keys(body)
+      hash = Prism.parse(body).value.statements.body.fetch(0)
+      hash.elements.map { it.key.unescaped.to_sym }
     end
   end
 end

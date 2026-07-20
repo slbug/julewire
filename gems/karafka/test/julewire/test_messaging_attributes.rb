@@ -5,7 +5,6 @@ require "test_helper"
 module Julewire
   class TestKarafkaMessagingAttributes < Minitest::Test
     cover Julewire::Karafka::MessagingAttributes
-
     def test_message_maps_message_fields_to_neutral_attributes
       fields = {
         topic: "events",
@@ -101,8 +100,8 @@ module Julewire
       assert_equal "2", attributes[:"messaging.destination.partition.id"]
       assert_equal 3, attributes[:"messaging.batch.message_count"]
       assert_equal "42", attributes[:"messaging.kafka.offset"]
-      refute attributes.key?(:"messaging.operation.type")
-      refute attributes.key?(:"messaging.consumer.group.name")
+      assert_false attributes.key?(:"messaging.operation.type")
+      assert_false attributes.key?(:"messaging.consumer.group.name")
     end
 
     def test_producer_monitor_uses_send_operation

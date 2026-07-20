@@ -7,10 +7,7 @@ module Julewire
     module LoggerOutputs
       class << self
         def install!
-          return if @installed
-
           ::ActiveSupport::Logger.singleton_class.prepend(Patch)
-          @installed = true
         end
 
         def julewire_logger?(logger)

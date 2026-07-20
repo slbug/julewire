@@ -1,64 +1,41 @@
 # frozen_string_literal: true
 
+require "concurrent/atomic/atomic_boolean"
+require "concurrent/atomic/atomic_fixnum"
+
 module Julewire
   module Core
     module Diagnostics
       module InvalidSeverityReporter
-        @warned = false
-        @mutex = Mutex.new
+        @warned = Concurrent::AtomicBoolean.new
 
         class RuntimeCounter
           def initialize
-            @mutex = Mutex.new
-            @count = 0
-            @last = nil
+            @count = Concurrent::AtomicFixnum.new
           end
 
-          def call(value, source: nil, event: nil)
-            metadata = InvalidSeverityReporter.metadata(value, source: source, event: event)
-            @mutex.synchronize do
-              @count += 1
-              @last = metadata
-            end
+          def call(value)
+            metadata = InvalidSeverityReporter.metadata(value)
+            @count.increment
             InvalidSeverityReporter.warn_once(metadata)
           rescue StandardError
             nil
           end
 
           def health
-            @mutex.synchronize do
-              {
-                count: @count,
-                last_event: @last&.fetch(:event, nil),
-                last_source: @last&.fetch(:source, nil),
-                last_value_class: @last&.fetch(:value_class, nil)
-              }.compact
-            end
+            { count: @count.value }
           end
 
           def reset!
-            @mutex.synchronize do
-              @count = 0
-              @last = nil
-            end
-            nil
-          end
-
-          def reset_after_fork!
-            @mutex = Mutex.new
-            @count = 0
-            @last = nil
-            nil
+            @count.value = 0
           end
         end
 
         private_constant :RuntimeCounter
 
         class << self
-          def call(value, source: nil, event: nil)
-            warning_only.call(value, source: source, event: event)
-          rescue StandardError
-            nil
+          def call(value)
+            warning_only.call(value)
           end
 
           def counter = RuntimeCounter.new
@@ -71,22 +48,11 @@ module Julewire
           end
 
           def reset!
-            @mutex.synchronize { @warned = false }
-            nil
+            @warned.make_false
           end
 
-          def reset_after_fork!
-            @mutex = Mutex.new
-            @warned = false
-            nil
-          end
-
-          def metadata(value, source:, event:)
-            {
-              event: event,
-              source: source,
-              value_class: value.class.name || value.class.to_s
-            }.compact.freeze
+          def metadata(value)
+            { value_class: value.class.to_s }.freeze
           rescue StandardError
             { value_class: "unknown" }.freeze
           end
@@ -98,12 +64,7 @@ module Julewire
           end
 
           def first_warning?
-            @mutex.synchronize do
-              return false if @warned
-
-              @warned = true
-              true
-            end
+            @warned.make_true
           end
         end
       end

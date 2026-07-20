@@ -4,7 +4,6 @@ module Julewire
   module Core
     module Processing
       class LevelThreshold
-        DEFAULT_EVENT = "log"
         DEFAULT_SEVERITY = :info
 
         attr_reader :level
@@ -20,32 +19,26 @@ module Julewire
         end
 
         def raw_input_allowed?(input)
-          return allow?(DEFAULT_SEVERITY) unless Records::RawInput.hash_input?(input)
-
-          severity, invalid, invalid_raw_value = raw_input_severity(input)
+          severity, invalid_raw_value = raw_input_severity(input)
           allowed = allow?(severity)
           # Surviving inputs warn later at Records::Draft normalization.
-          record_invalid_raw_severity(input, invalid_raw_value) if invalid && !allowed
+          record_invalid_raw_severity(invalid_raw_value) unless invalid_raw_value.equal?(MISSING) || allowed
           allowed
         end
 
         private
 
         def raw_input_severity(input)
-          return [DEFAULT_SEVERITY, false, nil] unless Records::RawInput.explicit_severity?(input)
+          return [DEFAULT_SEVERITY, MISSING] unless Records::RawInput.explicit_severity?(input)
 
           raw_value = Records::RawInput.value(input, :severity)
-          [Records::Severity.normalize(raw_value), false, nil]
+          [Records::Severity.normalize(raw_value), MISSING]
         rescue ArgumentError
-          [DEFAULT_SEVERITY, true, raw_value]
+          [DEFAULT_SEVERITY, raw_value]
         end
 
-        def record_invalid_raw_severity(input, raw_value)
-          @invalid_severity_reporter.call(
-            raw_value,
-            source: Records::RawInput.value(input, :source),
-            event: Records::RawInput.value(input, :event) || DEFAULT_EVENT
-          )
+        def record_invalid_raw_severity(raw_value)
+          @invalid_severity_reporter.call(raw_value)
         end
       end
     end

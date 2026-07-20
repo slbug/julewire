@@ -6,7 +6,6 @@ module Julewire
   class TestCaptureHeaders < Minitest::Test
     cover Julewire::Rack::Capture::Headers
     cover Julewire::Rack::Capture::HeaderSelection
-
     def test_request_broad_capture_normalizes_and_filters_headers
       headers = Julewire::Rack::Capture::Headers.request(
         request_double(
@@ -62,13 +61,15 @@ module Julewire
       assert_equal({ "x-response-id" => "123", "x-multi" => "a, b" }, headers)
     end
 
-    def test_response_explicit_capture_can_include_sensitive_headers
-      headers = Julewire::Rack::Capture::Headers.response(
-        { "X-Response-ID" => "res-1", "Set-Cookie" => "secret" },
-        selector: %w[set-cookie]
+    def test_response_explicit_capture_filters_and_normalizes_selector_names
+      assert_equal(
+        { "set-cookie" => "secret" },
+        response_headers({ "X-Response-ID" => "res-1", "Set-Cookie" => "secret" }, selector: %w[set-cookie])
       )
-
-      assert_equal({ "set-cookie" => "secret" }, headers)
+      assert_equal(
+        { "x-response-id" => "res-1" },
+        response_headers({ "X_Response_ID" => "res-1", "X-Trace-ID" => "trace-1" }, selector: %w[X_Response_ID])
+      )
     end
 
     def test_empty_inputs_and_selectors_do_not_capture
@@ -137,6 +138,10 @@ module Julewire
       Object.new.tap do |request|
         request.define_singleton_method(:env) { env }
       end
+    end
+
+    def response_headers(headers, selector:)
+      Julewire::Rack::Capture::Headers.response(headers, selector:)
     end
 
     def object_stringified_as(value)

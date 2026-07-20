@@ -6,8 +6,8 @@ module Julewire
     # Fiber-local context stack used by the runtime facade. Use Julewire.context
     # and Julewire.with_execution instead of reaching into this class directly.
     class ContextStore # rubocop:disable Metrics/ClassLength
-      EMPTY_HASH = {}.freeze
-      private_constant :EMPTY_HASH
+      PropagationOverlay = Data.define(:execution, :link_executions)
+      private_constant :PropagationOverlay
 
       class << self
         def current
@@ -26,10 +26,7 @@ module Julewire
         @scopes = []
         @ambient_fields = Fields::StackSet.new
         @execution_overlays = []
-        @execution_lineage_overlays = []
         @propagation_execution_hash = nil
-        @propagation_scope_snapshot = nil
-        @linked_propagation_scope_snapshot = nil
       end
 
       def current_scope = @scopes.last
@@ -85,26 +82,24 @@ module Julewire
         current_field_stack(:attributes).value_for(key, default: default)
       end
 
-      def add_context(fields = EMPTY_HASH, owned: false, **keyword_fields)
+      def add_context(fields = nil, owned: false, **keyword_fields)
         add_field(:context, field_input(fields, keyword_fields), owned: owned)
       end
 
-      def add_carry(fields = EMPTY_HASH, owned: false, **keyword_fields)
+      def add_carry(fields = nil, owned: false, **keyword_fields)
         add_field(:carry, field_input(fields, keyword_fields), owned: owned)
       end
 
-      def add_attributes(fields = EMPTY_HASH, owned: false, **keyword_fields)
+      def add_attributes(fields = nil, owned: false, **keyword_fields)
         add_field(:attributes, field_input(fields, keyword_fields), owned: owned)
       end
 
-      def add_neutral(fields = EMPTY_HASH, owned: false, **keyword_fields)
+      def add_neutral(fields = nil, owned: false, **keyword_fields)
         add_field(:neutral, field_input(fields, keyword_fields), owned: owned)
       end
 
       def delete_carry(path)
         path = Fields::Internal.normalize_path(path)
-        return if path.empty?
-
         if current_scope
           current_scope.delete_carry(path)
         else
@@ -112,19 +107,19 @@ module Julewire
         end
       end
 
-      def with_context(fields = EMPTY_HASH, owned: false, **keyword_fields, &)
+      def with_context(fields = nil, owned: false, **keyword_fields, &)
         with_scope_or_ambient_overlay(:context, field_input(fields, keyword_fields), owned: owned, &)
       end
 
-      def with_carry(fields = EMPTY_HASH, owned: false, **keyword_fields, &)
+      def with_carry(fields = nil, owned: false, **keyword_fields, &)
         with_scope_or_ambient_overlay(:carry, field_input(fields, keyword_fields), owned: owned, &)
       end
 
-      def with_attributes(fields = EMPTY_HASH, owned: false, **keyword_fields, &)
+      def with_attributes(fields = nil, owned: false, **keyword_fields, &)
         with_scope_or_ambient_overlay(:attributes, field_input(fields, keyword_fields), owned: owned, &)
       end
 
-      def with_neutral(fields = EMPTY_HASH, owned: false, **keyword_fields, &)
+      def with_neutral(fields = nil, owned: false, **keyword_fields, &)
         with_scope_or_ambient_overlay(:neutral, field_input(fields, keyword_fields), owned: owned, &)
       end
 
@@ -140,30 +135,21 @@ module Julewire
         end
       end
 
-      def with_propagation(context: {}, carry: {}, execution: {}, link_executions: false, owned: false, &)
-        scope = current_scope
+      def with_propagation(context:, carry:, execution:, link_executions:, owned:, &)
         execution = if owned
-                      Fields::FieldSet.deep_symbolize_owned_keys(execution)
+                      Serialization::DeepFreeze.validate_symbol_hash(execution)
                     else
                       Fields::FieldSet.deep_symbolize_keys(execution)
                     end
-        @execution_overlays.push(execution)
-        @execution_lineage_overlays.push(link_executions ? Execution::Lineage.from_execution_hash(execution) : nil)
+        @execution_overlays.push(PropagationOverlay.new(execution: execution, link_executions: link_executions))
         invalidate_propagation_cache!
 
         begin
-          if scope
-            scope.with_carry(carry, owned: owned) do
-              scope.with_context(context, owned: owned, &)
-            end
-          else
-            @ambient_fields.with(:carry, carry, owned: owned) do
-              @ambient_fields.with(:context, context, owned: owned, &)
-            end
+          with_carry(carry, owned: owned) do
+            with_context(context, owned: owned, &)
           end
         ensure
           @execution_overlays.pop
-          @execution_lineage_overlays.pop
           invalidate_propagation_cache!
         end
       end
@@ -214,12 +200,12 @@ module Julewire
         Execution::Scope.new(
           type: options.fetch(:type),
           id: options[:id],
-          execution: merged_execution_hash(options.fetch(:execution, EMPTY_HASH)),
+          execution: merged_execution_hash(options.fetch(:execution, {}), owned: options.fetch(:owned, false)),
           execution_owned: true,
           context: fields.stack(:context),
           attributes: fields.stack(:attributes),
           neutral: fields.stack(:neutral),
-          labels: options.fetch(:labels, EMPTY_HASH),
+          labels: options[:labels],
           carry: fields.stack(:carry),
           parent: parent_scope || linked_propagation_scope_snapshot,
           started_at: options[:started_at],
@@ -238,7 +224,7 @@ module Julewire
       end
 
       def add_scope_stack(stack_set, options, section:, key:)
-        value = options.fetch(key, EMPTY_HASH)
+        value = options[key]
         if options.fetch(:owned, false)
           stack_set.add(section, value, owned: true)
         else
@@ -246,37 +232,26 @@ module Julewire
         end
       end
 
-      def add_field(section, fields, owned: false)
+      def add_field(section, fields, owned:)
         scope = current_scope
         if scope
           scope.add_field(section, fields, owned: owned)
-        elsif owned
-          @ambient_fields.add(section, fields, owned: true)
         else
-          @ambient_fields.add(section, fields)
+          @ambient_fields.add(section, fields, owned: owned)
         end
       end
 
       def field_input(fields, keyword_fields)
         return fields if keyword_fields.empty?
-        return keyword_fields if empty_field_input?(fields)
 
-        fields.is_a?(Hash) ? fields.merge(keyword_fields) : fields
+        Fields::FieldSet.coerce(fields, keyword_fields, invalid: :wrap)
       end
 
-      def empty_field_input?(fields)
-        fields.nil? || (fields.respond_to?(:empty?) && fields.empty?)
-      end
-
-      def with_scope_or_ambient_overlay(section, fields, owned: false, &)
+      def with_scope_or_ambient_overlay(section, fields, owned:, &)
         scope = current_scope
         return scope.with_field(section, fields, owned: owned, &) if scope
 
-        if owned
-          @ambient_fields.with(section, fields, owned: true, &)
-        else
-          @ambient_fields.with(section, fields, &)
-        end
+        @ambient_fields.with(section, fields, owned: owned, &)
       end
 
       def current_field_stack(section)
@@ -297,32 +272,31 @@ module Julewire
       end
 
       def execution_hash
-        return {} if @execution_overlays.empty?
-
-        Fields::FieldSet.deep_dup(propagation_execution_hash)
+        Fields::FieldSet.deep_dup_owned(propagation_execution_hash)
       end
 
       def propagation_execution_hash
-        @propagation_execution_hash ||= Fields::Internal.frozen_copy(@execution_overlays.reduce({}) do |memo, overlay|
-          Fields::FieldSet.merge!(memo, overlay)
-        end)
+        @propagation_execution_hash ||= Fields::Internal.frozen_owned_copy(
+          @execution_overlays.reduce({}) do |memo, overlay|
+            Fields::Internal.merge_owned!(memo, overlay.execution)
+          end
+        )
       end
 
       def propagation_scope_snapshot
         execution = propagation_execution_hash
         return if execution.empty?
 
-        @propagation_scope_snapshot ||= Execution::ScopeSnapshot.new(execution: execution)
+        @propagation_scope_snapshot ||= Execution::ScopeSnapshot.new(execution: execution, owned: true)
       end
 
       def linked_propagation_scope_snapshot
-        lineage = linked_propagation_lineage
-        return unless lineage
+        return unless linked_propagation?
 
-        execution = propagation_execution_hash
-        return if execution.empty?
-
-        @linked_propagation_scope_snapshot ||= Execution::ScopeSnapshot.new(execution: execution, lineage: lineage)
+        @linked_propagation_scope_snapshot ||= Execution::ScopeSnapshot.new(
+          execution: propagation_execution_hash,
+          owned: true
+        )
       end
 
       def invalidate_propagation_cache!
@@ -331,56 +305,46 @@ module Julewire
         @linked_propagation_scope_snapshot = nil
       end
 
-      def linked_propagation_lineage
-        (@execution_overlays.length - 1).downto(0) do |index|
-          execution = @execution_overlays.fetch(index)
-          next if execution.empty?
-
-          return @execution_lineage_overlays.fetch(index)
-        end
-        nil
+      def linked_propagation?
+        @execution_overlays.reverse_each.find { |overlay| !overlay.execution.empty? }&.link_executions
       end
 
-      def merged_execution_hash(execution)
-        inherited = inherited_execution_hash
-        return inherited unless execution.is_a?(Hash) && !execution.empty?
+      def merged_execution_hash(execution, owned:)
+        return Fields::FieldSet.merge!(inherited_execution_hash, execution) unless owned
 
-        Fields::FieldSet.merge!(inherited, execution)
+        Serialization::DeepFreeze.validate_symbol_hash(execution)
+        Fields::Internal.merge_owned!(inherited_execution_hash, execution)
       end
 
       def inherited_execution_hash
         scope = current_scope
         return execution_hash unless scope
 
-        inherited = scope.inheritable_execution_hash
-        return inherited if @execution_overlays.empty?
-
-        overlay = execution_hash
-        return inherited if overlay.empty?
-
-        Fields::FieldSet.merge!(inherited, overlay)
+        Fields::Internal.merge_owned!(scope.inheritable_execution_hash, execution_hash)
       end
 
       def finish_scope(scope, on_finish, on_finish_failure, active_exception: nil)
         return unless on_finish
 
-        contain_finish_failure(on_finish_failure, active_exception) { scope.finish_owned unless scope.finished? }
-        contain_finish_failure(on_finish_failure, active_exception) { on_finish.call(scope) }
+        contain_finish_failure(on_finish_failure, active_exception, phase: :summary_finish) do
+          scope.finish_owned unless scope.finished?
+        end
+        contain_finish_failure(on_finish_failure, active_exception, phase: :summary_emit) { on_finish.call(scope) }
       end
 
-      def contain_finish_failure(on_finish_failure, active_exception)
+      def contain_finish_failure(on_finish_failure, active_exception, phase:)
         yield
       rescue StandardError => e
-        report_finish_failure(on_finish_failure, e)
+        report_finish_failure(on_finish_failure, e, phase: phase)
       rescue SystemStackError => e
         # Preserve the app's active stack error during unwind.
         raise unless active_exception
 
-        report_finish_failure(on_finish_failure, e)
+        report_finish_failure(on_finish_failure, e, phase: phase)
       end
 
-      def report_finish_failure(on_finish_failure, error)
-        on_finish_failure&.call(error)
+      def report_finish_failure(on_finish_failure, error, phase:)
+        on_finish_failure.call(error, phase: phase)
       rescue StandardError
         nil
       end

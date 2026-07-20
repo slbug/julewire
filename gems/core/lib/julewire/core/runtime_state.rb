@@ -7,11 +7,13 @@ module Julewire
       :pipeline,
       :pipeline_closed,
       :pipeline_generation
-    ) do
+    )
+
+    class RuntimeState
       class << self
-        def default(invalid_severity_reporter: Diagnostics::InvalidSeverityReporter.counter)
+        def default
           configuration = Configuration.new.snapshot
-          pipeline = configuration.build_pipeline(invalid_severity_reporter: invalid_severity_reporter)
+          pipeline = configuration.build_pipeline
 
           new(
             configuration: configuration,

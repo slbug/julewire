@@ -2,10 +2,15 @@
 
 require "test_helper"
 require "json"
-require "stringio"
 
 module Julewire
-  class TestConcurrencyWrappers < Minitest::Test # rubocop:disable Metrics/ClassLength
+  class TestConcurrencyWrappers < Minitest::Test
+    cover "Julewire::Ractor::Bridge.spawn_ractor"
+    cover "Julewire::Ractor::Bridge.start"
+    cover "Julewire::Ractor::Bridge.start_bridge"
+    cover "Julewire::Ractor::RemoteRuntime#start_execution"
+    cover "Julewire::Ractor::RemoteRuntime#emit_integration"
+    cover "Julewire::Ractor::RemoteRuntime#remote_emit"
     class QueueingOutput
       def initialize
         @records = Queue.new
@@ -18,52 +23,12 @@ module Julewire
       end
     end
 
-    def test_thread_wrapper_propagates_context_and_execution_overlay
-      assert_wrapper_propagates_context_and_execution(worker: "thread") do |&block|
-        Julewire.thread(&block).value
-      end
-    end
-
-    def test_fiber_wrapper_propagates_context_and_execution_overlay
-      assert_wrapper_propagates_context_and_execution(worker: "fiber") do |&block|
-        Julewire.fiber(&block).resume
-      end
-    end
-
-    def test_thread_and_fiber_wrappers_preserve_local_ruby_values
-      Julewire.context.add(role: :admin)
-
-      thread_role = Julewire.thread { Julewire.context[:role] }.value
-      fiber_role = Julewire.fiber { Julewire.context[:role] }.resume
-
-      assert_equal :admin, thread_role
-      assert_equal :admin, fiber_role
-    end
-
-    def test_ractor_uses_shared_julewire_integration_spi_contract
-      assert_julewire_integration_spi_contract
-    end
-
-    def test_thread_wrapper_applies_propagated_execution_to_direct_emits
-      output = QueueingOutput.new
-      Julewire.configure { configure_direct_destination(it, output: output) }
-
-      Julewire.with_execution(type: :request, fields: { trace_id: "trace-1" }, emit_summary: false) do
-        Julewire.thread { Julewire.emit(message: "direct") }.join
-      end
-
-      record = JSON.parse(output.pop)
-
-      assert_equal "trace-1", record.dig("execution", "trace_id")
-      assert_equal "request", record.dig("execution", "type")
-    end
-
     def test_ractor_wrapper_bridges_emits_to_parent_runtime
       with_experimental_ractor_warnings_suppressed do
         output = configured_ractor_output
         emit_from_nested_concurrency_boundaries
 
-        assert_ractor_record(JSON.parse(output.pop))
+        assert_ractor_record(record_after_flush(output))
       end
     end
 
@@ -73,8 +38,8 @@ module Julewire
 
         emit_from_nested_concurrency_boundaries
 
-        assert Julewire.flush(timeout: 1)
-        assert_ractor_record(JSON.parse(output.pop))
+        assert_true Julewire.flush(timeout: 1)
+        assert_ractor_record(JSON.parse(safe_queue_pop(output)))
       end
     end
 
@@ -90,15 +55,15 @@ module Julewire
           end.value
         end
 
-        assert Julewire.flush(timeout: 1)
-        assert_truncated_context(JSON.parse(output.pop).fetch("context"))
+        assert_true Julewire.flush(timeout: 1)
+        assert_truncated_context(JSON.parse(safe_queue_pop(output)).fetch("context"))
       end
     end
 
     def test_ractor_wrapper_bridges_execution_summaries_to_parent_runtime
       with_experimental_ractor_warnings_suppressed do
         output = emit_ractor_summary
-        record = JSON.parse(output.pop)
+        record = record_after_flush(output)
 
         assert_ractor_summary_record(record)
       end
@@ -113,28 +78,43 @@ module Julewire
           Julewire.start_execution(type: :unit, id: "u-1").run { Julewire.emit(message: "in-run") }
         end.value
 
-        assert_equal "in-run", JSON.parse(output.pop).fetch("message")
+        assert_equal "in-run", JSON.parse(safe_queue_pop(output)).fetch("message")
       end
     end
 
-    def test_ractor_wrapper_satisfies_execution_boundary_contract
-      with_experimental_ractor_warnings_suppressed do
-        output = QueueingOutput.new
-        formatter = :to_h.to_proc
+    def test_ractor_wrapper_propagates_context_and_emits_point_and_summary
+      output = QueueingOutput.new
+      formatter = :to_h.to_proc
+      traceparent = "00-06796866738c859f2f19b7cfb3214824-000000000000004a-01"
 
-        point, summary, health = assert_julewire_execution_boundary_contract(
-          configure: ->(config) { configure_direct_destination(config, formatter: formatter, output: output) },
-          exercise: method(:exercise_ractor_boundary_contract),
-          records: -> { Array.new(2) { JSON.parse(output.pop) } },
-          event_path: %w[event],
-          context_path: %w[context],
-          carry_path: %w[carry],
-          summary_payload_path: %w[payload]
-        )
+      with_experimental_ractor_warnings_suppressed do
+        Julewire.configure { configure_direct_destination(it, formatter: formatter, output: output) }
+        Julewire.context.add(request_id: "request-1")
+        Julewire.carry.add(http: { request_headers: { traceparent: traceparent } })
+        Julewire.ractor do
+          Julewire.with_execution(
+            type: :contract,
+            id: "contract-1",
+            summary_event: "contract.completed",
+            summary_source: "contract"
+          ) do
+            Julewire.summary.add(total: 2)
+            Julewire.emit(event: "contract.point", source: "contract", message: "point", payload: { value: 1 })
+          end
+        end.value
+
+        assert_true Julewire.flush(timeout: 1)
+
+        records = Array.new(2) { JSON.parse(safe_queue_pop(output)) }
+        point = records.find { it.fetch("event") == "contract.point" }
+        summary = records.find { it.fetch("event") == "contract.completed" }
 
         assert_equal "point", point.fetch("message")
+        assert_equal "request-1", point.dig("context", "request_id")
+        assert_equal traceparent, point.dig("carry", "http", "request_headers", "traceparent")
+        assert_equal 2, summary.dig("payload", "total")
         assert_equal "contract", summary.fetch("source")
-        assert_equal :ok, health.fetch(:status)
+        assert_equal :ok, Julewire.health.fetch(:status)
       end
     end
 
@@ -145,7 +125,45 @@ module Julewire
 
         Julewire.ractor { Julewire.emit("done") }.value
 
-        assert_equal "done", JSON.parse(output.pop).fetch("message")
+        assert_equal "done", record_after_flush(output).fetch("message")
+      end
+    end
+
+    def test_ractor_wrapper_normalizes_public_string_keys_before_the_owned_bridge
+      with_experimental_ractor_warnings_suppressed do
+        output = QueueingOutput.new
+        Julewire.configure { configure_direct_destination(it, output: output) }
+
+        Julewire.ractor do
+          Julewire.emit("message" => "done", "custom" => { "nested" => 1 })
+        end.value
+
+        record = record_after_flush(output)
+
+        assert_equal "done", record.fetch("message")
+        assert_equal 1, record.dig("payload", "custom", "nested")
+      end
+    end
+
+    def test_ractor_integration_emits_keep_the_owned_symbol_contract
+      with_experimental_ractor_warnings_suppressed do
+        output = QueueingOutput.new
+        Julewire.configure { configure_direct_destination(it, output: output) }
+
+        stats = Julewire.ractor do
+          Julewire::Core::Integration::Facade.emit(event: "integration.valid", payload: { token: "kept" })
+          Julewire::Core::Integration::Facade.emit(event: "integration.invalid", payload: { "token" => "lost" })
+          Julewire::Core::Integration::Facade.emit(event: "integration.unknown", custom: :lost)
+          Julewire::Ractor.child_stats
+        end.value
+
+        record = record_after_flush(output)
+
+        assert_equal "integration.valid", record.fetch("event")
+        assert_equal "kept", record.dig("payload", "token")
+        assert_equal 1, stats.dig(:counts, :messages_sent)
+        assert_equal 2, stats.dig(:counts, :messages_dropped)
+        assert_equal "TypeError", stats.fetch(:last_error_class)
       end
     end
 
@@ -156,7 +174,7 @@ module Julewire
 
         Julewire.ractor { Julewire.error("boom", event: "ractor.error") }.value
 
-        record = JSON.parse(output.pop)
+        record = record_after_flush(output)
 
         assert_equal "error", record.fetch("severity")
         assert_equal "boom", record.fetch("message")
@@ -164,7 +182,7 @@ module Julewire
       end
     end
 
-    def test_ractor_wrapper_can_emit_without_parent_level_gate
+    def test_ractor_integration_emit_can_bypass_the_parent_level_gate
       with_experimental_ractor_warnings_suppressed do
         output = QueueingOutput.new
         Julewire.configure do |config|
@@ -173,13 +191,16 @@ module Julewire
         end
 
         Julewire.ractor do
-          Julewire::Core::RuntimeLocator.current.emit_without_level(severity: :debug, message: "debug")
+          Julewire::Core::Integration::Facade.emit(severity: :debug, message: "filtered")
+          Julewire::Core::Integration::Facade.emit(
+            { severity: :debug, message: "bypassed" }, enforce_level: false
+          )
         end.value
 
-        record = JSON.parse(output.pop)
+        record = record_after_flush(output)
 
         assert_equal "debug", record.fetch("severity")
-        assert_equal "debug", record.fetch("message")
+        assert_equal "bypassed", record.fetch("message")
       end
     end
 
@@ -192,11 +213,26 @@ module Julewire
           Julewire.info { { message: "lazy", payload: { value: 1 } } }
         end.value
 
-        record = JSON.parse(output.pop)
+        record = record_after_flush(output)
 
         assert_equal "info", record.fetch("severity")
         assert_equal "lazy", record.fetch("message")
         assert_equal 1, record.dig("payload", "value")
+      end
+    end
+
+    def test_ractor_wrapper_contains_and_counts_public_emit_failures
+      with_experimental_ractor_warnings_suppressed do
+        Julewire.configure { configure_direct_destination(it, output: QueueingOutput.new) }
+
+        stats = Julewire.ractor do
+          Julewire.emit { raise ArgumentError, "invalid public input" }
+          Julewire::Ractor.child_stats
+        end.value
+
+        assert_equal 0, stats.dig(:counts, :messages_sent)
+        assert_equal 1, stats.dig(:counts, :messages_dropped)
+        assert_equal "ArgumentError", stats.fetch(:last_error_class)
       end
     end
 
@@ -218,49 +254,9 @@ module Julewire
 
     private
 
-    def assert_wrapper_propagates_context_and_execution(worker:, &run)
-      context, execution = Julewire.with_execution(
-        type: :request,
-        fields: { trace_id: "trace-1" },
-        emit_summary: false
-      ) do
-        Julewire.context.add(request_id: "request-1")
-
-        run.call do
-          Julewire.context.add(worker: worker)
-          Julewire.with_execution(type: :worker, emit_summary: false) do
-            [Julewire.context.to_h, Julewire.current_execution.execution_hash]
-          end
-        end
-      end
-
-      assert_equal "request-1", context[:request_id]
-      assert_equal worker, context[:worker]
-      assert_equal "trace-1", execution[:trace_id]
-      assert_equal "worker", execution[:type]
-      assert_empty Julewire.context.to_h
-    end
-
-    def exercise_ractor_boundary_contract(**)
-      Julewire.context.add(request_id: "request-1")
-      Julewire.carry.add(
-        http: {
-          request_headers: {
-            traceparent: "00-06796866738c859f2f19b7cfb3214824-000000000000004a-01"
-          }
-        }
-      )
-      Julewire.ractor do
-        Julewire.with_execution(
-          type: :contract,
-          id: "contract-1",
-          summary_event: "contract.completed",
-          summary_source: "contract"
-        ) do
-          Julewire.summary.add(total: 2)
-          Julewire.emit(event: "contract.point", source: "contract", message: "point", payload: { value: 1 })
-        end
-      end.value
+    def record_after_flush(output)
+      assert_true Julewire.flush(timeout: 1)
+      JSON.parse(safe_queue_pop(output))
     end
 
     def configured_ractor_output
@@ -275,7 +271,7 @@ module Julewire
     end
 
     def emit_from_nested_concurrency_boundaries
-      Julewire.thread do
+      thread = safe_julewire_thread do
         Julewire.context.add(worker: "thread")
         Julewire.ractor do
           Julewire.context.add(ractor_worker: "ractor")
@@ -284,7 +280,8 @@ module Julewire
             Julewire.emit(severity: :error, source: "app", event: "work", message: "done")
           end.resume
         end.value
-      end.join
+      end
+      safe_thread_value(thread)
     end
 
     def assert_ractor_record(record)
@@ -301,13 +298,19 @@ module Julewire
 
     def with_experimental_ractor_warnings_suppressed
       Julewire.enable_experimental_ractor!
-      return yield unless Warning.respond_to?(:[])
+      without_bridge_monitor do
+        return yield unless Warning.respond_to?(:[])
 
-      previous = Warning[:experimental]
-      Warning[:experimental] = false
-      yield
-    ensure
-      Warning[:experimental] = previous if defined?(previous)
+        previous = Warning[:experimental]
+        Warning[:experimental] = false
+        yield
+      ensure
+        Warning[:experimental] = previous if defined?(previous)
+      end
+    end
+
+    def without_bridge_monitor(&)
+      with_overridden_singleton_method(Julewire::Ractor::Bridge, :monitor_ractor, proc { |*_arguments| false }, &)
     end
 
     def emit_ractor_summary
@@ -330,7 +333,7 @@ module Julewire
       assert_equal "job.completed", record.fetch("event")
       assert_equal "request-1", record.dig("context", "request_id")
       assert_equal "ractor", record.dig("context", "worker")
-      refute record.key?("carry")
+      assert_false record.key?("carry")
       assert_equal 1, record.dig("payload", "processed")
     end
 
@@ -338,7 +341,7 @@ module Julewire
       assert_match(/\Ax+\.\.\.\[Truncated\]\z/, context.fetch("blob"))
       metadata = context.fetch("_julewire_truncation")
 
-      assert metadata.fetch("truncated")
+      assert_true metadata.fetch("truncated")
       assert_equal ["blob"], metadata.fetch("truncated_fields")
       assert_equal Julewire::Core::Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
                    metadata.dig("limits", "max_string_bytes")

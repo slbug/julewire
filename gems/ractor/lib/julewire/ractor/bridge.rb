@@ -17,14 +17,14 @@ module Julewire
 
         def enabled? = ENABLED.get
 
-        def spawn(args:, name:, runtime:, &)
+        def start(args:, name:, runtime:, &)
           unless enabled?
             raise Core::Error, "Julewire.ractor is experimental; call Julewire.enable_experimental_ractor! first"
           end
 
           RuntimeValidation.validate!(runtime)
 
-          envelope = Core::Propagation.capture
+          envelope = Core::Propagation.capture_local
           body = ::Ractor.shareable_proc(&)
           port = ::Ractor::Port.new
           ractor = spawn_ractor(
@@ -58,19 +58,23 @@ module Julewire
         def monitor_ractor(ractor)
           return unless ractor
 
-          ::Ractor::Port.new.tap { ractor.monitor(it) }
+          monitor_port = ::Ractor::Port.new
+          return unless monitor_port.instance_of?(::Ractor::Port)
+
+          ractor.monitor(monitor_port)
+          monitor_port
         rescue StandardError
           nil
         end
 
         def spawn_ractor(args:, name:, port:, envelope:, body:, emit_non_standard_exception_summaries:)
-          # :nocov:
+          # simplecov:disable
           ::Ractor.new(port, envelope, body, emit_non_standard_exception_summaries, *args, name: name) do
             |bridge_port, captured_envelope, callable, emit_non_standard_summaries, *call_args|
-            Julewire::Core::RuntimeLocator.current = Julewire::Ractor::RemoteRuntime.new(
+            Core::RuntimeLocator.current = RemoteRuntime.new(
               port: bridge_port, emit_non_standard_exception_summaries: emit_non_standard_summaries
             )
-            Julewire::Core::Propagation.restore(captured_envelope, owned: true) do
+            Core::Propagation.restore(captured_envelope, owned: true) do
               callable.call(*call_args)
             end
           ensure
@@ -81,12 +85,10 @@ module Julewire
               nil
             end
           end
-          # :nocov:
+          # simplecov:enable
         end
 
         def handle_message(runtime, message)
-          return unless message.is_a?(Hash)
-
           response = dispatch(runtime, message)
           reply_to(message, response)
         rescue StandardError => e
@@ -95,7 +97,9 @@ module Julewire
         end
 
         def dispatch(runtime, message)
-          case message[:command]
+          validate_message!(message)
+          command = message.fetch(:command)
+          case command
           when :emit
             dispatch_emit(runtime, message, enforce_level: true)
           when :emit_without_level
@@ -105,7 +109,9 @@ module Julewire
               RemoteSummaryRecord.new(RemotePayload.hash_value(message, :payload))
             )
           when :flush
-            runtime.flush(timeout: message.dig(:payload, :timeout))
+            runtime.flush(timeout: message.fetch(:payload).fetch(:timeout))
+          else
+            raise ArgumentError, "unknown ractor bridge command: #{command.inspect}"
           end
         end
 
@@ -117,8 +123,14 @@ module Julewire
         end
 
         def reply_to(message, response)
+          return unless message.is_a?(Hash)
+
           reply = message[:reply]
-          reply.send(response) if reply_port?(reply)
+          return unless reply
+
+          raise TypeError, "ractor bridge reply must be a Ractor::Port" unless reply_port?(reply)
+
+          reply.send(response)
         rescue StandardError => e
           Stats.message_failed(e)
           nil
@@ -126,6 +138,10 @@ module Julewire
 
         def reply_port?(reply)
           reply.is_a?(::Ractor::Port)
+        end
+
+        def validate_message!(message)
+          Core::Integration::Protocol.validate_symbol_hash(message)
         end
       end
     end

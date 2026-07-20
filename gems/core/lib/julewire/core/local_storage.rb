@@ -15,15 +15,12 @@ module Julewire
       private_constant :RUNTIME_KEY, :CONTEXT_STORE_THREAD_KEY, :CONTEXT_STORE_FIBER_IVAR
 
       @runtime_ref = Concurrent::AtomicReference.new
-      @runtime_mutex = Mutex.new
 
       class << self
         def runtime
           return ractor_runtime if ractor_local_storage?
 
-          runtime_ref.get || runtime_mutex.synchronize do
-            runtime_ref.get || Runtime.new.tap { runtime_ref.set(it) }
-          end
+          runtime_ref.update { it || Runtime.new }
         end
 
         def runtime=(runtime)
@@ -42,22 +39,9 @@ module Julewire
           store_context(nil)
         end
 
-        def after_fork!
-          runtime = runtime_ref.get
-          @runtime_mutex = Mutex.new
-          @runtime_ref = Concurrent::AtomicReference.new(runtime)
-          nil
-        end
-
-        # Private testing seam for storage-selection behavior.
-        def main_ractor?
-          ::Ractor.main?
-        end
-        private :main_ractor?
-
         private
 
-        attr_reader :runtime_mutex, :runtime_ref
+        attr_reader :runtime_ref
 
         def ractor_runtime
           ::Ractor.store_if_absent(RUNTIME_KEY) { Runtime.new }
@@ -83,7 +67,7 @@ module Julewire
         end
 
         def ractor_local_storage?
-          !main_ractor?
+          !::Ractor.main?
         end
       end
     end

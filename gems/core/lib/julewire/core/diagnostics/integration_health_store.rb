@@ -1,60 +1,47 @@
 # frozen_string_literal: true
 
+require "concurrent/map"
+
 module Julewire
   module Core
     module Diagnostics
       class IntegrationHealthStore
         def initialize
-          @mutex = Mutex.new
-          @entries = {}
+          @entries = Concurrent::Map.new
         end
 
         def record_failure(integration, error, **metadata)
           name = normalize_name(integration)
           metadata = { phase: :integration, integration: name }.merge(metadata)
-          @mutex.synchronize do
-            entry_for(name).record_failure(error, **metadata)
-          end
-          nil
-        rescue StandardError
+          entry_for(name).record_failure(error, **metadata)
           nil
         end
 
         def record_success(integration)
           name = normalize_name(integration)
-          @mutex.synchronize do
-            entry_for(name).record_success
-          end
-          nil
-        rescue StandardError
+          entry_for(name).record_success
           nil
         end
 
         def health
-          @mutex.synchronize do
-            @entries.to_h { |name, entry| [name, entry.snapshot] }.freeze
-          end
+          @entries.each_pair.with_object({}) do |(name, entry), snapshot|
+            snapshot[name] = entry.snapshot
+          end.freeze
         end
 
         def reset!
-          @mutex.synchronize { @entries.clear }
-          nil
-        end
-
-        def after_fork!
-          @mutex = Mutex.new
-          @entries = {}
+          @entries.clear
           nil
         end
 
         private
 
         def entry_for(name)
-          @entries[name] ||= Health.new(counter_keys: [:failures])
+          @entries.compute_if_absent(name) { Health.new(counter_keys: []) }
         end
 
         def normalize_name(value)
-          Core.normalize_name(value, name: :integration)
+          Core.normalize_name(value)
         rescue StandardError
           :unknown
         end

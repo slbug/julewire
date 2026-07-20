@@ -5,7 +5,7 @@ require "test_helper"
 module Julewire
   class TestRecordValidationEdges < Minitest::Test
     cover Julewire::Core::Records::Record
-
+    cover "Julewire::Core::Serialization::DeepFreeze.validate_symbol_keys"
     class EqualHash < Hash
       def hash = self.class.hash
       def eql?(other) = other.is_a?(self.class)
@@ -53,6 +53,16 @@ module Julewire
       assert_same record, Julewire::Core::Records::Record.validate_normalized_hash!(record)
     end
 
+    def test_record_from_normalized_hash_keeps_every_container_seen_after_identity_map_promotion
+      containers = Array.new(6) { SinglePassHash.new.merge!(safe: true) }
+      root = SinglePassHash.new
+      containers.each_with_index { |container, index| root[:"container_#{index}"] = container }
+      root[:repeats] = [root, *containers]
+      record = normalized_record(payload: root)
+
+      assert_same record, Julewire::Core::Records::Record.validate_normalized_hash!(record)
+    end
+
     def test_record_from_normalized_hash_continues_after_shared_container
       shared = { safe: true }
 
@@ -67,15 +77,13 @@ module Julewire
       )
     end
 
-    def test_record_from_normalized_hash_ignores_string_keys_past_normalization_depth
-      record = Julewire::Core::Records::Record.from_normalized_hash(
+    def test_record_from_normalized_hash_rejects_string_keys_past_normalization_depth
+      assert_record_rejects_string_keys(
         normalized_record(payload: deep_string_key_hash_at_record_depth(Julewire::Core::NORMALIZATION_MAX_DEPTH))
       )
-
-      assert deep_value_contains?(record.fetch(:payload), Julewire::Core::Serialization::Serializer::MAX_DEPTH_VALUE)
     end
 
-    def test_record_from_normalized_hash_continues_after_depth_cutoff_branch
+    def test_record_from_normalized_hash_continues_key_validation_after_deep_branch
       payload = {
         deep: deep_string_key_hash_at_record_depth(Julewire::Core::NORMALIZATION_MAX_DEPTH),
         shallow: { "unsafe" => true }
@@ -161,14 +169,6 @@ module Julewire
           max_string_bytes: 10
         }
       }
-    end
-
-    def deep_value_contains?(value, expected)
-      return true if value == expected
-      return value.any? { deep_value_contains?(it, expected) } if value.is_a?(Array)
-      return value.any? { |_, item| deep_value_contains?(item, expected) } if value.is_a?(Hash)
-
-      false
     end
   end
 end

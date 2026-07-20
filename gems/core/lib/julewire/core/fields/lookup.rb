@@ -8,25 +8,21 @@ module Julewire
           def value(source, key)
             return unless source.respond_to?(:[])
 
-            direct = source[key]
-            return direct unless direct.nil?
-
-            alternate_key(source, key)
+            source[key]
           rescue StandardError
             nil
           end
 
-          def blank?(value)
-            value.nil? || (value.respond_to?(:empty?) && value.empty?)
+          # Decoded wire records have String keys, while in-process records use
+          # Symbols. Keep this conversion at presentation boundaries instead of
+          # making ordinary core lookups tolerant.
+          def wire_value(source, key)
+            result = value(source, key)
+            result.nil? ? value(source, key.to_s) : result
           end
 
-          private
-
-          def alternate_key(source, key)
-            case key
-            when Symbol then source[key.name]
-            when String then source[key.to_sym]
-            end
+          def blank?(value)
+            value.nil? || (value.respond_to?(:empty?) && value.empty?)
           end
         end
       end

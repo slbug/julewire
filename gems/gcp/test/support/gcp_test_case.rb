@@ -8,6 +8,11 @@ module Julewire
       Core::Records::Draft.build(input, context: {}, scope: nil).to_record
     end
 
+    def owned_record(input = {})
+      base = normalized_record
+      Core::Records::Record.from_owned_hash(base.to_h.merge(input))
+    end
+
     def formatted_record(record = normalized_record, formatter: GCP::Formatter.new)
       JSON.parse(Core::Serialization::JsonEncoder.new.call(formatter.call(record)))
     end
@@ -50,10 +55,6 @@ module Julewire
       }.tap do |error|
         error[:cause] = cause if cause
       end
-    end
-
-    def gcp_fixture(name)
-      JSON.parse(File.read(File.expand_path("../fixtures/gcp/#{name}.json", __dir__)))
     end
   end
 end

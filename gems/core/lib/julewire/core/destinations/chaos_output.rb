@@ -25,7 +25,7 @@ module Julewire
           when :raise then raise "julewire punk chaos output failure"
           when :reject then false
           when :sleep
-            sleep(@sleep_seconds)
+            Kernel.sleep(@sleep_seconds)
             @output.write(value)
           end
         end
@@ -77,7 +77,7 @@ module Julewire
         end
 
         def trigger?
-          @rate.positive? && @random.rand < @rate
+          @random.rand < @rate
         end
 
         def chaos_mode

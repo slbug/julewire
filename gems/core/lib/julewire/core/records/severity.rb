@@ -12,29 +12,21 @@ module Julewire
 
         class << self
           def normalize(value)
-            return value if RANKS.key?(value)
-
-            severity = severity_symbol(value)
-            return severity if RANKS.key?(severity)
+            case value
+            when Symbol
+              return value if RANKS.key?(value)
+            when String
+              severity = STRING_VALUES[value.downcase]
+              return severity unless severity.nil?
+            when Integer
+              severity = LOGGER_INTEGER_VALUES[value]
+              return severity unless severity.nil?
+            end
 
             raise ArgumentError, "unsupported severity: #{value.inspect}"
           end
 
-          def severity_symbol(value)
-            case value
-            when Symbol
-              value.downcase
-            when String
-              STRING_VALUES[value.downcase]
-            when Integer
-              LOGGER_INTEGER_VALUES[value]
-            end
-          end
-
           def rank(value)
-            rank = RANKS[value]
-            return rank unless rank.nil?
-
             RANKS.fetch(normalize(value))
           end
         end

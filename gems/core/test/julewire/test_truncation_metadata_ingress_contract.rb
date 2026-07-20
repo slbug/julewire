@@ -5,6 +5,9 @@ require "test_helper"
 module Julewire
   class TestTruncationMetadataIngressContract < Minitest::Test
     cover Julewire::Core::Serialization::ValueCopy
+    cover "Julewire::Core::Serialization::ValueCopy#copy_container"
+    cover Julewire::Core::Fields::FieldSet
+    cover "Julewire::Core::Fields::Internal.frozen_copy"
 
     def test_rejects_reserved_truncation_metadata_key_at_symbol_ingress
       error = assert_raises(ArgumentError) do
@@ -48,6 +51,26 @@ module Julewire
       assert_equal "_julewire_truncation is reserved for Julewire truncation metadata", error.message
     end
 
+    def test_default_field_duplication_rejects_reserved_truncation_metadata
+      error = assert_raises(ArgumentError) do
+        Julewire::Core::Fields::FieldSet.deep_dup(
+          _julewire_truncation: symbol_truncation_metadata
+        )
+      end
+
+      assert_equal "_julewire_truncation is reserved for Julewire truncation metadata", error.message
+    end
+
+    def test_default_frozen_copy_rejects_reserved_truncation_metadata
+      error = assert_raises(ArgumentError) do
+        Julewire::Core::Fields::Internal.frozen_copy(
+          _julewire_truncation: symbol_truncation_metadata
+        )
+      end
+
+      assert_equal "_julewire_truncation is reserved for Julewire truncation metadata", error.message
+    end
+
     def test_preserves_symbol_truncation_metadata_marker_for_owned_metadata
       copied = Julewire::Core::Serialization::ValueCopy.call(
         { _julewire_truncation: symbol_truncation_metadata },
@@ -76,8 +99,8 @@ module Julewire
                                         max_string_bytes: 10
     end
 
-    def test_rejects_oversized_owned_metadata_without_scanning_past_limit
-      metadata = symbol_truncation_metadata.merge(truncated_fields: ["field", exploding_field])
+    def test_rejects_owned_metadata_beyond_the_configured_array_limit
+      metadata = symbol_truncation_metadata.merge(truncated_fields: %w[first second])
 
       error = assert_raises(ArgumentError) do
         Julewire::Core::Serialization::ValueCopy.call(
@@ -92,14 +115,6 @@ module Julewire
     end
 
     private
-
-    def exploding_field
-      Object.new.tap do |object|
-        def object.is_a?(*)
-          raise "metadata field scanner crossed the configured limit"
-        end
-      end
-    end
 
     def string_truncation_metadata
       {

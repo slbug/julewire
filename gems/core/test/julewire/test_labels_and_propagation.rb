@@ -7,7 +7,8 @@ require "stringio"
 module Julewire
   class TestLabelsAndPropagation < Minitest::Test
     cover Julewire::Core::Fields::StaticLabels
-
+    cover Julewire::Core::Propagation
+    cover "Julewire::Core::FacadeMethods#labels"
     def test_static_labels_are_added_to_point_and_summary_records
       output = StringIO.new
 
@@ -60,6 +61,14 @@ module Julewire
 
       labels.remove(:service).remove(:env)
 
+      assert_empty labels.to_h
+    end
+
+    def test_static_labels_clear_empties_fields_and_returns_self
+      labels = Julewire::Core::Fields::StaticLabels.new
+      labels.add(service: "billing", env: "test")
+
+      assert_same labels, labels.clear
       assert_empty labels.to_h
     end
 

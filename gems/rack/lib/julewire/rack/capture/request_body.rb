@@ -27,28 +27,46 @@ module Julewire
         private
 
         def capture_body
-          body = bounded_body
-          bytes = content_length || body.bytesize
+          body, bytes = bounded_body
           captured, truncated = capture(body, total_bytes: bytes)
           [captured, bytes, truncated]
         rescue StandardError
           nil
         end
 
+        def captured_body_bytes(body, trust_actual_bytes:)
+          actual_bytes = body.bytesize
+          return actual_bytes if trust_actual_bytes && actual_bytes <= @limit
+
+          [content_length, actual_bytes].compact.max
+        end
+
         def bounded_body
-          return request_body if @limit.nil?
+          return uncapped_body unless @limit
 
           length = content_length
-          return request_body if length && length <= @limit
+          return trusted_body if length && length <= @limit
 
-          read_body_stream(limit: @limit + 1)
+          body, position = read_body_stream(limit: @limit + 1)
+          [body, captured_body_bytes(body, trust_actual_bytes: position&.zero?)]
+        end
+
+        def uncapped_body
+          body = request_body
+          [body, body.bytesize]
+        end
+
+        def trusted_body
+          body = request_body
+          [body, captured_body_bytes(body, trust_actual_bytes: true)]
         end
 
         def request_body
           # Rack/Rails may already buffer raw_post; the byte cap applies after that read.
           return @request.raw_post if @request.respond_to?(:raw_post)
 
-          read_body_stream(limit: nil)
+          body, = read_body_stream(limit: nil)
+          body
         end
 
         def read_body_stream(limit:)
@@ -61,7 +79,7 @@ module Julewire
           ensure
             restore_body_stream(io, original_position)
           end
-          body.to_str
+          [body.to_str, original_position]
         end
 
         def body_stream_position(io)

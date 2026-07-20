@@ -6,6 +6,8 @@ require "stringio"
 
 module Julewire
   class TestRecordValidationAndCallbacks < Minitest::Test
+    cover Julewire::Core::Records::Record
+    cover Julewire::Core::Diagnostics::CallbackNotifier
     class FailingOutput
       def write(_value)
         raise "write failed"
@@ -33,6 +35,23 @@ module Julewire
       assert_equal "ArgumentError", record.dig("payload", "error", "class")
     end
 
+    def test_emit_error_record_bypasses_application_level
+      output = StringIO.new
+
+      Julewire.configure do |config|
+        config.level = :fatal
+        configure_destination(config, output: output)
+      end
+
+      assert_nil Julewire.emit(kind: :unknown, severity: :fatal, message: "bad adapter")
+
+      record = JSON.parse(output.string)
+
+      assert_equal "julewire.emit_error", record.fetch("event")
+      assert_equal "error", record.fetch("severity")
+      assert_equal "ArgumentError", record.dig("payload", "error", "class")
+    end
+
     def test_record_preserves_falsey_explicit_event_and_timestamp_values
       record = build_record(
         {
@@ -45,7 +64,7 @@ module Julewire
       )
 
       assert_equal "false", record.fetch(:event)
-      assert_same false, record.fetch(:timestamp)
+      assert_false record.fetch(:timestamp)
     end
 
     def test_record_with_log_safe_fields_is_ractor_shareable
@@ -59,7 +78,7 @@ module Julewire
         scope: nil
       )
 
-      assert Ractor.shareable?(record)
+      assert_true Ractor.shareable?(record)
     end
 
     def test_failure_notifier_passes_metadata_hash
@@ -74,7 +93,7 @@ module Julewire
 
       Julewire.emit(source: "app", event: "failed")
 
-      error_class, phase, metadata = calls.pop
+      error_class, phase, metadata = safe_queue_pop(calls)
 
       assert_equal "RuntimeError", error_class
       assert_equal :output, phase
@@ -107,7 +126,7 @@ module Julewire
 
       Julewire.emit("failed")
 
-      assert_equal :default, calls.pop
+      assert_equal :default, safe_queue_pop(calls)
     end
 
     def test_callback_notifier_calls_fixed_metadata_shape
@@ -117,6 +136,43 @@ module Julewire
 
       assert_equal 0, callback.parameter_calls
       assert_equal [[:output], [:output]], callback.calls
+    end
+
+    def test_callback_notifier_returns_true_and_restores_existing_fiber_state
+      key = Julewire::Core::Diagnostics::CallbackNotifier.const_get(:ACTIVE_KEY)
+      Fiber[key] = :outer
+
+      result = Julewire::Core::Diagnostics::CallbackNotifier.call(
+        ->(_error, _metadata) {},
+        RuntimeError.new("boom"),
+        { phase: :output }
+      )
+
+      assert_true result
+      assert_equal :outer, Fiber[key]
+    ensure
+      Fiber[key] = nil if key
+    end
+
+    def test_callback_notifier_reports_nested_callback_with_original_metadata
+      nested_result = nil
+
+      result = Julewire::Core::Diagnostics::CallbackNotifier.call(
+        lambda do |_error, metadata|
+          nested_result = Julewire::Core::Diagnostics::CallbackNotifier.call(
+            ->(_nested_error, _nested_metadata) { flunk "nested callback should not run" },
+            RuntimeError.new("nested"),
+            metadata
+          )
+        end,
+        RuntimeError.new("outer"),
+        { destination: :default, phase: :drop }
+      )
+
+      assert_true result
+      assert_true Julewire::Core::Diagnostics::CallbackNotifier.failure?(nested_result)
+      assert_equal :drop, nested_result.to_h.fetch(:phase)
+      assert_equal :default, nested_result.to_h.fetch(:destination)
     end
 
     def test_callback_recursion_is_suppressed_and_counted

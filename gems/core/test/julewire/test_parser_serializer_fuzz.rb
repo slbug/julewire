@@ -5,8 +5,8 @@ require "json"
 
 module Julewire
   class TestParserSerializerFuzz < Minitest::Test
+    cover "Julewire::Core::Serialization::EncodingSanitizer.call"
     cover Julewire::Core::Serialization::Serializer
-
     SEED = 0x20260612
     ITERATIONS = 120
     TRUNCATED_SUFFIX = "...[Truncated]"
@@ -46,7 +46,7 @@ module Julewire
         with_fuzz_context("carrier", index) do
           envelope = random_envelope(random)
           carrier = random_carrier(random, envelope)
-          extracted = Core::Propagation::Carrier.extract(carrier)
+          extracted = Core::Propagation::Carrier.extract_envelope(carrier)
 
           assert_kind_of Hash, extracted
           JSON.generate(Core::Serialization::Serializer.call(extracted), allow_nan: false)
@@ -90,7 +90,7 @@ module Julewire
       assert_predicate value, :valid_encoding?
       return if value.bytesize <= max_string_bytes
 
-      assert value.end_with?(TRUNCATED_SUFFIX)
+      assert_true value.end_with?(TRUNCATED_SUFFIX)
       assert_operator value.bytesize, :<=, max_string_bytes + TRUNCATED_SUFFIX.bytesize
     end
 

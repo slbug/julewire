@@ -5,7 +5,8 @@ require "test_helper"
 module Julewire
   class TestRequestAttributes < Minitest::Test
     cover Julewire::Rails::RequestAttributes
-
+    cover Julewire::Rails::RequestFields
+    cover "Julewire::Rails::RequestAttributes.rendered_error_details"
     def test_context_and_neutral_request_fields
       request = request_double
 
@@ -62,6 +63,26 @@ module Julewire
       assert_rails_request_fields(summary.dig(:attributes, :rails))
     end
 
+    def test_response_summary_uses_top_level_julewire_rack_capture
+      shadow_rack = Module.new do
+        const_set(:Capture, Module.new do
+          const_set(:BodyContentType, Module.new do
+            def self.header_value(*) = raise "nested Rack must not be used"
+          end)
+        end)
+      end
+
+      with_temporary_constant(Julewire::Rails::RequestAttributes, :Rack, shadow_rack) do
+        summary = Julewire::Rails::RequestAttributes.response_summary(
+          request_double,
+          201,
+          { "content-type" => "application/json" }
+        )
+
+        assert_equal "application/json", summary.dig(:attributes, :rails, :response_content_type)
+      end
+    end
+
     def test_response_summary_compacts_nil_neutral_status
       summary = Julewire::Rails::RequestAttributes.response_summary(
         request_double,
@@ -82,7 +103,7 @@ module Julewire
 
       assert_equal "RuntimeError", summary.dig(:attributes, :rails, :error_class)
       assert_equal 503, summary.dig(:attributes, :rails, :status)
-      assert summary.dig(:attributes, :rails, :rescue_response)
+      assert_true summary.dig(:attributes, :rails, :rescue_response)
       assert_equal "diagnostics", summary.dig(:attributes, :rails, :rescue_template)
       assert_equal 503, summary.dig(:neutral, :"http.response.status_code")
       assert_rails_request_fields(summary.dig(:attributes, :rails))
@@ -96,26 +117,41 @@ module Julewire
         wrapper: failing_response_wrapper
       )
 
-      refute contained.dig(:attributes, :rails, :rescue_response)
+      assert_false contained.dig(:attributes, :rails, :rescue_response)
       refute_includes contained.dig(:attributes, :rails), :rescue_template
     end
 
-    def test_rendered_error_summary_uses_rendered_error_metadata
-      summary = Julewire::Rails::RequestAttributes.rendered_error_summary(
-        request_double,
-        {
-          error: RuntimeError.new("boom"),
-          rescue_response: true,
-          rescue_template: "custom"
-        },
-        status: 500
+    def test_error_details_shape_and_rendered_error_details_metadata
+      error = RuntimeError.new("boom")
+      details = Julewire::Rails::RequestAttributes.error_details(
+        error,
+        wrapper: response_wrapper(response: true, template: "diagnostics")
+      )
+      rendered = Julewire::Rails::RequestAttributes.rendered_error_details(
+        error: error,
+        rescue_response: false,
+        rescue_template: "custom"
       )
 
-      assert summary.dig(:attributes, :rails, :rescue_response)
-      assert_equal "custom", summary.dig(:attributes, :rails, :rescue_template)
-      assert_equal "RuntimeError", summary.dig(:attributes, :rails, :error_class)
-      assert_equal 500, summary.dig(:attributes, :rails, :status)
-      assert_equal 500, summary.dig(:neutral, :"http.response.status_code")
+      assert_equal({}, details.fetch(:neutral))
+      assert_equal "RuntimeError", details.dig(:attributes, :rails, :error_class)
+      assert_true details.dig(:attributes, :rails, :rescue_response)
+      assert_equal "diagnostics", details.dig(:attributes, :rails, :rescue_template)
+      assert_equal "RuntimeError", rendered.dig(:attributes, :rails, :error_class)
+      assert_false rendered.dig(:attributes, :rails, :rescue_response)
+      assert_equal "custom", rendered.dig(:attributes, :rails, :rescue_template)
+      assert_equal({}, rendered.fetch(:neutral))
+    end
+
+    def test_rendered_error_details_keeps_absent_rendered_metadata_as_nil
+      details = Julewire::Rails::RequestAttributes.rendered_error_details(error: RuntimeError.new("boom"))
+      rails = details.dig(:attributes, :rails)
+
+      assert_includes rails, :rescue_response
+      assert_includes rails, :rescue_template
+      assert_nil rails.fetch(:rescue_response)
+      assert_nil rails.fetch(:rescue_template)
+      assert_equal({}, details.fetch(:neutral))
     end
 
     def test_reader_failures_are_contained
@@ -238,6 +274,7 @@ module Julewire
 
     def failing_request_double
       Object.new.tap do |request|
+        request.define_singleton_method(:request_id) { raise "bad request id" }
         request.define_singleton_method(:request_method) { "GET" }
         request.define_singleton_method(:path) { "/edge" }
         request.define_singleton_method(:protocol) { raise "bad protocol" }

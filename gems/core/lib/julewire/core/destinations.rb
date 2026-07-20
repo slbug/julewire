@@ -13,13 +13,6 @@ module Julewire
           nil
         end
 
-        # Private testing seam for `Julewire::Testing.unregister_destination`.
-        def unregister(kind)
-          @factories.delete(normalize_name(kind))
-          nil
-        end
-        private :unregister
-
         def factory_for(kind)
           @factories[normalize_name(kind)]
         end

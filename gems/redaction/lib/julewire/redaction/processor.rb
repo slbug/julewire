@@ -32,9 +32,7 @@ module Julewire
                                authorization_header: authorization_header
                              )
                            end
-        @redact_keys = !@matcher.empty?
-        @redact_scalars = @string_redactor || !@blocks.empty?
-        @enabled = @redact_keys || @redact_scalars
+        @enabled = !@matcher.empty? || @string_redactor || !@blocks.empty?
         @record_transform = Core::Processing::RecordFieldTransform.new(
           max_array_items: @max_array_items,
           max_depth: @max_depth,
@@ -72,29 +70,30 @@ module Julewire
         end
       end
 
-      def redact_item(item, key:, path:, original:, prefixed_path:, **)
+      def redact_item(item, key:, original:, path:, prefixed_path:, **)
         return @mask if redacted_key?(key, path: path, prefixed_path: prefixed_path)
-        if @redact_scalars && !item.is_a?(Hash) && !item.is_a?(Array)
-          return redact_scalar(item, key: key, original: original)
-        end
 
-        Core::Serialization::BoundedTransform::CONTINUE
+        if !item.instance_of?(Hash) && !item.instance_of?(Array)
+          redact_scalar(item, key: key, original: original)
+        else
+          Core::Serialization::BoundedTransform::CONTINUE
+        end
       end
 
       def redacted_key?(key, path:, prefixed_path:)
-        return false unless @redact_keys && key
-        return true if @matcher.match?(key, path: path)
+        return true if key && @matcher.match?(key, path: path)
 
-        prefixed_path && @matcher.match?(key, path: prefixed_path)
+        prefixed_path && @matcher.match?(nil, path: prefixed_path)
       end
 
       def redact_scalar(value, key:, original:)
         value = apply_block_filters(key, value, original) if key && !@blocks.empty?
-        value.is_a?(String) && @string_redactor ? @string_redactor.call(value) : value
+        @string_redactor ? @string_redactor.call(value) : value
       end
 
       def apply_block_filters(key, value, original)
-        key_copy = key.to_s.dup
+        key_copy = +""
+        key_copy.concat(key.to_s)
         value_copy = duplicate_filter_value(value)
         @blocks.each do |block|
           block.arity == 2 ? block.call(key_copy, value_copy) : block.call(key_copy, value_copy, original)

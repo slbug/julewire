@@ -13,14 +13,17 @@ module Julewire
       DEBUG_EVENTS = %w[
         action_controller.unpermitted_parameters
       ].freeze
-
-      def initialize(configuration, parameter_filter: Core::UNSET)
+      def initialize(configuration, parameter_filter: Julewire::Core::UNSET)
         @configuration = configuration
-        @parameter_filter_override = parameter_filter
+        @parameter_filter = if parameter_filter.equal?(Julewire::Core::UNSET)
+                              ParameterFilters.build(ParameterFilters.configured)
+                            else
+                              parameter_filter
+                            end
       end
 
       def call(event, name:, payload:)
-        values = Core::Integration::Values::Shape
+        values = Julewire::Core::Integration::Values::Shape
         {
           timestamp: values.timestamp(event[:timestamp]),
           severity: severity_for(name),
@@ -38,7 +41,7 @@ module Julewire
         when nil
           {}
         when Hash
-          values = Core::Integration::Values::Shape
+          values = Julewire::Core::Integration::Values::Shape
           values.payload_hash(payload)
         else
           serialize_payload_object(payload)
@@ -48,14 +51,14 @@ module Julewire
       private
 
       def attributes_for(event, payload)
-        values = Core::Integration::Values::Shape
+        values = Julewire::Core::Integration::Values::Shape
         rails = payload.empty? ? {} : payload
         values.append_compact_field(rails, :tags, values.hash_or_empty(event[:tags]))
         { rails: rails }
       end
 
       def neutral_for(event)
-        values = Core::Integration::Values::Shape
+        values = Julewire::Core::Integration::Values::Shape
         values.source_location_attributes(event[:source_location])
       end
 
@@ -87,41 +90,10 @@ module Julewire
       end
 
       def filter_event_payload(payload)
-        return payload unless @configuration.filter_event_payloads?
-
-        filter = rails_parameter_filter
-        return payload unless filter
-
-        filtered = filter.filter(payload)
+        filtered = @parameter_filter.filter(payload) if @configuration.filter_event_payloads?
         filtered.is_a?(Hash) ? filtered : payload
       rescue StandardError
         payload
-      end
-
-      def rails_parameter_filter
-        return @parameter_filter_override unless @parameter_filter_override.equal?(Core::UNSET)
-        return @rails_parameter_filter if @rails_parameter_filter_loaded
-
-        @rails_parameter_filter_loaded = true
-        filters = rails_filter_parameters
-        @rails_parameter_filter = build_parameter_filter(filters)
-      end
-
-      def build_parameter_filter(filters)
-        return if filters.empty?
-
-        ::ActiveSupport::ParameterFilter.new(::ActiveSupport::ParameterFilter.precompile_filters(filters))
-      end
-
-      def rails_filter_parameters
-        app = ::Rails.application if defined?(::Rails) && ::Rails.respond_to?(:application)
-        return Array(app.filter_parameters) if app.respond_to?(:filter_parameters)
-
-        config = app.config if app.respond_to?(:config)
-        filters = config.filter_parameters if config.respond_to?(:filter_parameters)
-        Array(filters)
-      rescue StandardError
-        []
       end
     end
   end

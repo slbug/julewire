@@ -23,7 +23,7 @@ module Julewire
           end
         end
 
-        def initialize(configuration = Configuration.new)
+        def initialize(configuration)
           @configuration = configuration
         end
 
@@ -35,22 +35,18 @@ module Julewire
 
           IntegrationHealth.with_failure_health(action: :process_action, component: :controller_response_subscriber) do
             fields = capture_attributes(event.payload)
-            Core::Integration::Facade.add_summary_attributes(fields[:attributes])
-            Core::Integration::Facade.add_summary_neutral(fields[:neutral])
+            Core::Integration::Facade.add_summary_attributes(fields.fetch(:attributes))
+            Core::Integration::Facade.add_summary_neutral(fields.fetch(:neutral))
           end
         end
 
         private
 
         def capture_attributes(payload)
-          rails_fields = capture_fields(payload)
-          neutral = {}
-          response_body_bytes = rails_fields[:response_body_bytes]
-          if response_body_bytes
-            neutral = {
-              Core::Fields::AttributeKeys::HTTP_RESPONSE_BODY_SIZE => response_body_bytes
-            }
-          end
+          rails_fields = RequestAttributes.normalize_user_fields(capture_fields(payload))
+          neutral = {
+            Core::Fields::AttributeKeys::HTTP_RESPONSE_BODY_SIZE => rails_fields[:response_body_bytes]
+          }
           { attributes: { rails: rails_fields }, neutral: neutral }
         end
 
@@ -105,12 +101,11 @@ module Julewire
         end
 
         def capture_headers(key)
-          headers = yield
-          headers.empty? ? nil : { key => headers }
+          { key => yield }
         end
 
         def merge_capture_fields(fields, captured)
-          fields.merge!(captured) if captured && !captured.empty?
+          fields.merge!(captured) if captured
         end
       end
     end

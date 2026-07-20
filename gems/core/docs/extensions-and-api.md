@@ -29,7 +29,7 @@ Allowed processor returns:
 nil                         # draft was mutated in place or unchanged
 draft                       # explicit draft return
 :drop                       # stop delivery
-anything else               # ignored; current draft continues
+anything else               # current draft continues and health records it
 ```
 
 Mutate the draft for ordinary enrichment:
@@ -46,6 +46,12 @@ primary processor API:
 draft.fetch(:context).fetch(:account)[:id] = "changed"
 ```
 
+Draft data is already normalized. Processors must use Symbol keys for every
+new or replacement hash key; processors are not a String-key normalization
+boundary. Core validates the current draft after every processor. Invalid data
+is attributed to the processor that produced it, reported, and dropped before a
+later processor can observe it.
+
 Use transform helpers when replacing values or sections. They invalidate cached
 records and keep execution lineage when execution identity is unchanged:
 
@@ -53,6 +59,11 @@ records and keep execution lineage when execution identity is unchanged:
 draft.transform_field!(:severity) { :warn }
 draft.transform_section!(:payload) { |payload| payload.merge(sampled: true) }
 ```
+
+Transform identifiers are strict Symbols. `transform_field!` accepts only
+known record fields, and `transform_section!` accepts only documented Hash
+sections. These processor-owned helpers do not normalize String identifiers or
+create ad hoc top-level fields.
 
 Use `transform_record!` for whole-record replacement transforms:
 
@@ -95,6 +106,9 @@ config.processors.use Julewire::Match.new do
 end
 ```
 
+`Match` condition keys are Symbol keys. A condition whose pattern is `nil`
+matches a present field with a nil value; it does not match a missing field.
+
 For deterministic head sampling, use the registered `:sampling` processor:
 
 ```ruby
@@ -115,13 +129,14 @@ The default is `on_error: :fail_closed`: core attempts to emit a minimal
 `julewire.processor_error` record, the original record is not delivered, and
 later processors are not run. Use `on_error: :fail_open` for non-critical
 enrichment processors that should record the failure, keep the current draft,
-and continue. Use `on_error: :drop` when a failing processor should suppress
-the record. `on_error:` is a registry option, not a processor constructor
-keyword.
+and continue, provided the draft still satisfies the owned record contract.
+Fail-open never forwards malformed data. Use `on_error: :drop` when a failing
+processor should suppress the record. `on_error:` is a registry option, not a
+processor constructor keyword.
 
-Non-raising draft corruption is detected at the final immutable
-`Julewire::Record` boundary and contained as an `emit_record` failure
-without per-processor attribution.
+Non-raising draft corruption is detected immediately after the processor and
+reported as `:processor_data` or `:destination_processor_data` before the
+record is dropped.
 
 Processors can inspect execution lineage before the default formatter strips it
 from public output. Promote only the pieces you want to expose:
@@ -162,10 +177,12 @@ Application emit input crosses a few small objects before it becomes a draft:
 | Facade merge | `Core.emit_input` | Combine positional input and keyword fields without normalizing app objects. |
 | Lazy block | `Records::LazyEmitInput` | Keep block-built payloads lazy until the level gate passes and preserve eager severity helpers. |
 | Threshold peek | `Records::RawInput` | Read severity, source, and event from raw input without building a record. |
-| Draft build | `Draft::BuildInput` | Split raw input into normalized top-level fields plus payload. |
+| Draft build | `Records::BuildInput` | Split public input into known top-level fields plus payload, or validate strict owned input. |
 
-This split keeps below-threshold eager input and lazy blocks cheap while the
-final immutable `Record` boundary still validates the full shape.
+This split keeps below-threshold eager input and lazy blocks cheap. Owned
+integration input is validated before processors, each processor result is
+validated before the next processor, and the immutable `Record` boundary keeps
+the destination contract explicit.
 
 ## Formatters
 
@@ -324,7 +341,7 @@ parts with important ownership or boundary rules.
 `EncodingSanitizer.call` repairs strings into valid UTF-8. It is intentionally
 string-only; passing other objects is a type error.
 
-`FieldSet` is the public helper for integration-owned field hashes. Its
+`FieldSet` is the public helper for defensive field hashes. Its
 documented surface is:
 
 - `coerce`
@@ -336,8 +353,11 @@ documented surface is:
 
 `coerce`, `merge`, and `merge!` normalize string keys to symbols and
 defensive-copy values before inserting them, so later caller mutation does not
-mutate core field containers. Use symbol keys after that boundary. `VALUE_KEY`
-is the key used when non-hash field input is wrapped instead of dropped.
+mutate core field containers. They are public-ingress helpers, not repairs for
+integration-owned or cross-gem protocol data. Use `Integration::Protocol` to
+validate owned data and keep Symbol keys after the ingress boundary.
+`VALUE_KEY` is the key used when non-hash field input is wrapped instead of
+dropped.
 
 Other `FieldSet` singleton helpers are core-internal implementation support and
 are not part of the extension contract.
@@ -349,13 +369,17 @@ Encoders and transport boundaries that need pure log-safe data should use
 `Serializer.call` there.
 
 `RecordFieldTransform` walks core's normalized record containers with
-`BoundedTransform`. It owns record-shape policy only; processors supply the
+`BoundedTransform.call`. It owns record-shape policy only; processors supply the
 actual filtering or replacement policy.
 
 `Carrier` serializes propagation envelopes into flat string carriers for
 external boundaries. It is provider-neutral and does not parse or synthesize
 external headers. Use `max_bytes:` to leave a carrier unchanged and return
 `nil` when the serialized envelope is too large for the target boundary.
+Use `Carrier.extract_result` from integrations that need health/status detail.
+It returns a `Carrier::Extracted` value with `status`, `reason`, `error`, and
+`envelope`. Use `Carrier.extract_envelope` only when a best-effort envelope hash
+is enough.
 
 `Julewire::RecordDraft.build` is the raw-input construction path used by core and
 integration code. `Julewire::RecordDraft#to_record` freezes the final normalized data into
@@ -365,6 +389,10 @@ input builder; it is the read-only destination boundary. Use
 symbol-key normalized record hash and needs the immutable destination shape.
 That path validates the strict internal contract; it does not clean up
 JSON-style or user-input hashes. Use `RecordDraft.build` at raw boundaries.
+
+Summary finalizer failure callbacks receive the contained error plus
+`phase: :summary_finish` or `phase: :summary_emit`, so integration callbacks
+should accept keyword metadata.
 
 ## Public Facade
 
@@ -376,12 +404,15 @@ Integrations that keep process-local state can register a reset hook with
 component: :component_name) { ... }`. The hook runs after core has refreshed its
 own process-local state and after the active pipeline has forwarded
 `after_fork!` to destinations.
+Both hook names are strict integration identifiers: pass non-empty Symbols.
+String or non-Symbol names raise at registration and are never normalized.
 
 `Julewire.observe_self!(runtime_name = :default, target: :meta)` starts a
 `Julewire::Core::Diagnostics::MetaObserver`. The observer samples one runtime's
 health and emits health-change records into another named runtime. Pass
 `start: false` and call `sample!` manually when deterministic polling is
-preferred.
+preferred. Call `observer.stop!` to cancel scheduled sampling when the
+observer is no longer needed.
 
 Framework and provider adapters may also use the core integration SPI. The
 `Julewire::Core::Integration` namespace is split by concern:
@@ -418,13 +449,25 @@ procs; return a normalized value or raise.
 
 Runtime access:
 
+- `Integration::Protocol.validate_symbol_keys(value)` for recursive validation
+  of integration-owned data before it crosses an internal gem, thread, or
+  Ractor protocol boundary. It returns the same value and raises `TypeError`
+  for every non-Symbol hash key; it never normalizes protocol data. Validation
+  is iterative and continues beyond the later copy/serialization depth bound.
+- `Integration::Protocol.validate_symbol_hash(value)` additionally requires the
+  owned section itself to be a `Hash`. Direct integration SPI rejects malformed
+  sections immediately. Runtime emit boundaries contain, report, and drop that
+  failure instead of emitting a record with silently removed data.
 - `Integration::Facade.with_execution` for framework integrations that
   build fresh execution attributes and want the same execution boundary as
   `Julewire.with_execution` without copying already-owned attribute hashes.
 - `Integration::Facade.emit` for framework/provider integrations that
   emit already-normalized, adapter-owned record hashes. This is not the
   app-facing `Julewire.emit` input path; integrations should pass explicit
-  record keys such as `:event`, `:source`, `:payload`, and `:attributes`.
+  Symbol record keys such as `:event`, `:source`, `:payload`, and
+  `:attributes`. Every nested hash key must also be a Symbol; this API does
+  not normalize String keys. Custom fields belong inside a documented record
+  section; unknown top-level fields are rejected rather than ignored.
 
 Owned field overlays:
 
@@ -433,7 +476,10 @@ Owned field overlays:
   hashes around callback, request, or message processing.
 - `Integration::Facade.add_context`, `add_carry`, `add_attributes`, and
   `add_neutral` for already-normalized, adapter-owned field hashes added to the
-  current execution or ambient context.
+  current execution or ambient context. Every nested hash key must be a Symbol;
+  these owned overlays do not normalize String keys. Non-Hash values are
+  contract errors and are never silently ignored, including when no execution
+  scope is active.
   `add_carry` and `add_neutral` are deliberate symmetry points for integrations
   that need ambient propagation or formatter-coordination fields outside a
   scoped callback.
@@ -461,9 +507,9 @@ methods or indexed access.
 
 Bounded transforms:
 
-- `Julewire::Core::Serialization::BoundedTransform` when a processor or adapter needs a bounded
-  walk with core-compatible depth, array, hash, string, cycle, and truncation
-  behavior.
+- `Julewire::Core::Serialization::BoundedTransform.call` when a processor or
+  adapter needs a bounded walk with core-compatible depth, array, hash, string,
+  cycle, and truncation behavior.
   It can insert `_julewire_truncation` metadata before the final encoder sees
   the payload.
 - `Julewire::Serializer.truncation_metadata` and serializer truncation
@@ -474,67 +520,16 @@ This SPI is documented support for integration gems, but not a compatibility
 freeze. It may change when the ecosystem gets cleaner. `contracts.md` is the
 source of truth for the current tier inventory.
 
-## Extension Contract Tests
+## Extension Tests
 
-Extensions can require `julewire/core/testing` for small test primitives:
+Extensions can require `julewire/core/testing` for four small observation
+fixtures: `Julewire::Testing::CaptureDestination`,
+`Julewire::Testing::NullOutput`, `Julewire::Testing.capture`, and
+`Julewire::Testing.configure_capture_destination`.
 
-- `Julewire::Testing::CaptureDestination`
-- `Julewire::Testing::NullOutput`
-- `Julewire::Testing.configure_capture_destination`
-- `Julewire::Testing::Chaos`
-- `Julewire::Testing::Contracts`
-- `Julewire::Testing::Coverage`
-
-These helpers are shipped support for Julewire extension and integration gems,
-not runtime application API.
-
-`Julewire::Testing::Chaos.assert_contained(test_context) { |error| ... }`
-runs a small `StandardError` corpus through containment checks. Use it for
-extension paths that promise to absorb formatter, processor, destination, or
-subscriber failures.
-`Julewire::Testing::Chaos.assert_core_runtime_containment(test_context)` runs
-the same corpus through core's curated runtime containment surfaces: processors,
-formatters, encoders, outputs, callbacks, and lifecycle hooks.
-`Julewire::Testing::Chaos.assert_destination_chaos_contract(...)` runs the
-same corpus through a destination's formatter, encoder, output or transport,
-and callback containment paths using destination builders supplied by the
-extension test.
-`Julewire::Testing::Chaos.assert_emitter_chaos_contract(...)` runs the same
-corpus through a subscriber/listener-style entrypoint while the extension test
-keeps ownership of framework-shaped failing inputs.
-`Julewire::Testing::Chaos.catalog { ... }` builds a deterministic component
-catalog, and `assert_discovered_chaos_contracts(...)` runs the corpus through
-registered processor, formatter, encoder, destination, subscriber, and listener
-entries. Use it when an extension can describe its containment surfaces without
-reflecting over framework internals.
-`Julewire::Testing::Chaos.raiser(error)` builds a callable that raises the
-supplied error.
-
-`Julewire::Testing::Contracts` contains shared extension assertions.
-`contracts.md` owns the current helper inventory.
-
-Contract helper tiers:
-
-- Component contracts (`processor`, `formatter`, `destination`,
-  `record_draft`, record shape/source) are the documented extension test surface.
-- Runtime, execution, propagation, integration, validation, truncation, bounded
-  transform, and scheduler contracts are integration SPI tests.
-- Chaos helpers are shipped support for containment checks. They are intended
-  for extension/integration test suites, not app runtime code.
-
-The runtime integration helper emits one point record inside an execution,
-adds context, carry, and summary data, flushes, and asserts that destination
-health is visible. Extensions provide their own output decoder and record paths,
-because formatters may move Julewire fields into a different output shape.
-
-`Julewire::Testing::Coverage` is shipped test support for Julewire
-extension gems. It only requires SimpleCov when `Coverage.start!` runs with
-`COVERAGE` set, so runtime users do not load coverage dependencies.
-
-The execution-boundary helper gives integration and propagation extensions the
-same probe data and lets the extension run it through its own unit of work. The
-failure-containment helper verifies that extension failures do not escape
-application calls and that health reports degradation.
+Core does not ship an assertion DSL or failure-corpus harness. Integration gems
+test their production formatter, destination, processor, subscriber, and
+framework boundary directly.
 
 ## Internal or Advanced
 
@@ -558,7 +553,8 @@ building another internal record.
 
 `Julewire::Core::RuntimeLocator.current=` is an advanced runtime hook for bridge
 code. A bridge runtime must support the child-side facade methods it exposes and
-the parent-side bridge calls it forwards: `emit_envelope`,
+the facade reset hook `reset_facade!`, strict `emit_integration`, plus the
+parent-side bridge calls it forwards: `emit_envelope`,
 `emit_summary_record`, and `flush`. It is deliberately duck-typed; incompatible
 runtimes fail when called, so application code should not replace it casually.
 

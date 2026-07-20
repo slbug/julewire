@@ -24,6 +24,11 @@ module Julewire
   end
 
   class TestPipelineHealthMetrics < Minitest::Test
+    cover Julewire::Core::Processing::Pipeline
+    cover "Julewire::Core::Processing::ProcessorChain*"
+    cover "Julewire::Core::Processing::Pipeline#health"
+    cover "Julewire::Core::Processing::Pipeline#record_destination_drop"
+
     def test_pipeline_health_counts_output_accepted_and_level_dropped_records
       output = StringIO.new
 
@@ -45,6 +50,42 @@ module Julewire
       assert_equal 0, destination_counts.fetch(:formatter_error)
       assert_equal 0, destination_counts.fetch(:output_error)
       assert_equal 0, counts.fetch(:processor_error)
+    end
+
+    def test_pipeline_health_snapshot_has_stable_shape_for_configured_and_unconfigured_pipelines
+      unconfigured = build_pipeline.health
+      configured = build_pipeline(output: StringIO.new).health
+      expected_keys = %i[configured counts destinations last_callback_failure last_failure status]
+
+      assert_equal expected_keys, unconfigured.keys
+      assert_false unconfigured.fetch(:configured)
+      assert_equal :unconfigured, unconfigured.fetch(:status)
+      assert_empty unconfigured.fetch(:destinations)
+      assert_nil unconfigured.fetch(:last_callback_failure)
+      assert_nil unconfigured.fetch(:last_failure)
+
+      assert_equal expected_keys, configured.keys
+      assert_true configured.fetch(:configured)
+      assert_equal :ok, configured.fetch(:status)
+      assert_includes configured.fetch(:destinations), :default
+    end
+
+    def test_pipeline_health_snapshot_exposes_failures_and_callback_failures
+      Julewire.configure do |config|
+        configure_destination(config, output: StringIO.new)
+        config.processors.use(->(_record) { raise "processor failed" })
+        config.on_failure = ->(_error, _metadata) { raise "callback failed" }
+      end
+
+      Julewire.emit(message: "processor")
+
+      health = Julewire.health.fetch(:pipeline)
+
+      assert_equal :degraded, health.fetch(:status)
+      assert_equal "RuntimeError", health.dig(:last_failure, :class)
+      assert_equal :processor, health.dig(:last_failure, :phase)
+      assert_equal "RuntimeError", health.dig(:last_callback_failure, :class)
+      assert_equal :processor, health.dig(:last_callback_failure, :phase)
     end
 
     def test_pipeline_health_counts_output_errors
@@ -73,7 +114,7 @@ module Julewire
       health = Julewire.health
 
       assert_output_failure_health(health)
-      assert_output_failure_metadata(failures.pop)
+      assert_output_failure_metadata(safe_queue_pop(failures))
       assert_equal %i[output_exception output_exception output_exception], nonblocking_queue_values(drops)
       assert_equal 3, health.dig(:pipeline, :destinations, :default, :counts, :output_exception)
       assert_equal 3, formatter.calls
@@ -111,7 +152,7 @@ module Julewire
 
       Julewire.emit(message: "too large")
 
-      reason, metadata = drops.pop
+      reason, metadata = safe_queue_pop(drops)
       health = Julewire.health
 
       assert_empty output.string

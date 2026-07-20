@@ -2,6 +2,7 @@
 /benchmarks/
 /test_julewire_app/
 /scratchpad/
+/.local/
 /Rakefile.local
 **/.bundle/
 **/.yardoc

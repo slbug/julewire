@@ -5,14 +5,14 @@ module Julewire
     module Subscribers
       class Error
         class << self
-          include Core::Integration::SubscriberInstall
+          include Julewire::Core::Integration::SubscriberInstall
 
           def install!(configuration)
             return reset! unless configuration.error_reports?
-            return unless defined?(::Rails) && ::Rails.respond_to?(:error)
-            return unless ::Rails.error.respond_to?(:subscribe)
 
             reporter = ::Rails.error
+            return unless reporter.respond_to?(:subscribe)
+
             install_subscriber(configuration, enabled: true) do |subscriber|
               Julewire::RailsSupport::EventReporter.subscribe(reporter, subscriber)
             end
@@ -30,7 +30,7 @@ module Julewire
           return if Suppression.active?
           return if request_owned_dispatch_error?(error, handled, source)
 
-          Core::Integration::Facade.emit(
+          Julewire::Core::Integration::Facade.emit(
             severity: julewire_severity(severity),
             event: "rails.error",
             logger: "Rails.error",
@@ -42,7 +42,7 @@ module Julewire
             } },
             error: error
           )
-          IntegrationHealth.record_success(action: :report, component: :error_subscriber)
+          IntegrationHealth.record_success
         rescue StandardError => e
           IntegrationHealth.record_failure(
             e,
@@ -54,28 +54,24 @@ module Julewire
         private
 
         def request_owned_dispatch_error?(error, handled, source)
-          return false unless handled == false
-          return false unless source == "application.action_dispatch"
-
-          RequestErrorOwnership.consume?(error)
+          handled == false &&
+            source == "application.action_dispatch" &&
+            RequestErrorOwnership.consume?(error)
         end
 
         def julewire_severity(severity)
-          severity.to_sym == :warning ? :warn : severity
-        rescue StandardError
+          return :warn if [:warning, "warning"].include?(severity)
+
           severity
         end
 
         def hash_or_empty(value)
-          return {} unless value.is_a?(Hash)
-
-          values = Core::Integration::Values::Shape
+          values = Julewire::Core::Integration::Values::Shape
           normalize_context(values.hash_or_empty(value))
         end
 
         def normalize_context(context)
           controller = context[:controller]
-          return context unless context.key?(:controller)
           return context if controller.nil? || controller.is_a?(String)
 
           context.merge(controller: controller.class.name || controller.to_s)

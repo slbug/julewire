@@ -9,17 +9,13 @@ module Julewire
         def install!(base: nil, event_reporter: nil, configuration: Configuration.new)
           return unless configuration.enabled?
 
-          Julewire::ActiveJob.config = configuration
+          ActiveJob.config = configuration
           base ||= active_job_base
           raise Error, "ActiveJob::Base is not available" unless base
 
           install_serialization(base, configuration)
           install_execution_callback(base, configuration)
-          if configuration.structured_events?
-            Subscribers::Event.install!(configuration, event_reporter: event_reporter)
-          else
-            Subscribers::Event.reset!
-          end
+          Subscribers::Event.install!(configuration, event_reporter: event_reporter)
           LogSubscriberSilencer.silence! if configuration.silence_log_subscriber?
           base
         end
@@ -33,24 +29,15 @@ module Julewire
 
         def install_serialization(base, configuration)
           install_serialization_configuration(base, configuration)
-          return if base < JobSerialization
 
           base.prepend(JobSerialization)
         end
 
         def install_serialization_configuration(base, configuration)
-          if base.respond_to?(:class_attribute)
-            unless base.respond_to?(JobSerialization::CONFIGURATION_METHOD)
-              base.class_attribute(
-                JobSerialization::CONFIGURATION_METHOD,
-                instance_accessor: false,
-                instance_predicate: false
-              )
-            end
-            base.public_send("#{JobSerialization::CONFIGURATION_METHOD}=", configuration)
-          else
-            base.instance_variable_set(JobSerialization::CONFIGURATION_IVAR, configuration)
+          if base.singleton_methods(false).include?(JobSerialization::CONFIGURATION_METHOD)
+            base.singleton_class.remove_method(JobSerialization::CONFIGURATION_METHOD)
           end
+          base.define_singleton_method(JobSerialization::CONFIGURATION_METHOD) { configuration }
         end
 
         def install_execution_callback(base, configuration)
@@ -59,7 +46,7 @@ module Julewire
           installed = EXECUTION_INSTALL.fetch(base)
           if installed
             installed.configuration = configuration
-            return installed
+            return
           end
 
           callback = ExecutionCallback.new(configuration)
@@ -79,7 +66,7 @@ module Julewire
         attr_writer :configuration
 
         def call(job, &)
-          Julewire::ActiveJob::JobExecution.call(job, configuration: @configuration, &)
+          JobExecution.call(job, configuration: @configuration, &)
         end
       end
       private_constant :ExecutionCallback

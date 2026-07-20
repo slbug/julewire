@@ -21,11 +21,11 @@ module Julewire
             return reset! unless configuration.structured_events?
 
             Core::Integration::Lifecycle.require_optional(STRUCTURED_EVENT_FILE)
-            reporter = event_reporter || Julewire::RailsSupport::EventReporter.default
-            return unless Julewire::RailsSupport::EventReporter.subscribable?(reporter)
+            reporter = event_reporter || RailsSupport::EventReporter.default
+            return unless RailsSupport::EventReporter.subscribable?(reporter)
 
             install_subscriber(configuration, enabled: true) do |subscriber|
-              Julewire::RailsSupport::EventReporter.subscribe(reporter, subscriber) { subscriber.accept?(it) }
+              RailsSupport::EventReporter.subscribe(reporter, subscriber) { subscriber.accept?(it) }
             end
           end
         end
@@ -45,7 +45,7 @@ module Julewire
         def emit_event(event)
           name = event[:name].to_s
           record = record_for(event, name)
-          enrich_continuation_summary(name, record.dig(:attributes, :active_job) || {})
+          enrich_continuation_summary(name, record.fetch(:attributes).fetch(:active_job))
           Core::Integration::Facade.emit(record)
         end
 
@@ -60,13 +60,13 @@ module Julewire
         def base_record(event, name, payload)
           values = Core::Integration::Values::Shape
           record = {
-            severity: severity_for(name, payload),
             event: name,
             logger: "ActiveJob.event",
             context: values.hash_or_empty(event[:context]),
             attributes: attributes_for(event, payload),
             neutral: neutral_for(event, payload)
           }
+          values.append_field(record, :severity, severity_for(name, payload))
           values.append_field(record, :timestamp, values.timestamp(event[:timestamp]))
           values.append_field(record, :source, @configuration.source)
           record
@@ -81,22 +81,17 @@ module Julewire
 
         def neutral_for(event, payload)
           values = Core::Integration::Values::Shape
-          Core::Fields::FieldSet.merge!(
+          Core::Fields::FieldSet.merge(
             JobAttributes.call(payload),
             values.source_location_attributes(event[:source_location])
           )
         end
 
         def severity_for(name, payload)
-          return :error if ERROR_EVENTS.include?(name)
-          return :error if exception_payload?(payload)
-
-          :info
+          :error if ERROR_EVENTS.include?(name) || exception_payload?(payload)
         end
 
         def exception_payload?(payload)
-          return false unless payload.is_a?(Hash)
-
           payload.key?(:exception_class) ||
             payload.key?(:exception_message) ||
             payload.key?(:exception_backtrace)
@@ -111,8 +106,6 @@ module Julewire
         end
 
         def enrich_continuation_summary(name, payload)
-          return unless Core::Integration::Facade.summary_active?
-
           case name
           when "active_job.step_started"
             increment_summary(:continuation_steps_started)

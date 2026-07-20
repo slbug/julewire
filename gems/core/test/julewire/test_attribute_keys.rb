@@ -4,6 +4,7 @@ require "test_helper"
 
 module Julewire
   class TestAttributeKeys < Minitest::Test
+    cover Julewire::Core::Fields::AttributeKeys
     def test_fields_wraps_compacted_values
       assert_equal(
         { "http.request.method": "GET" },
@@ -17,6 +18,15 @@ module Julewire
       refute_same fields, Core::Fields::AttributeKeys.fields(fields)
     end
 
+    def test_fields_accepts_hash_subclasses
+      fields = Class.new(Hash).new.merge!("http.request.method": "GET")
+
+      assert_equal(
+        { "http.request.method": "GET" },
+        Core::Fields::AttributeKeys.fields(fields)
+      )
+    end
+
     def test_fields_omits_empty_values
       assert_equal({}, Core::Fields::AttributeKeys.fields(nil))
       assert_equal({}, Core::Fields::AttributeKeys.fields({}))
@@ -25,16 +35,6 @@ module Julewire
 
     def test_fields_rejects_non_hash_values
       assert_equal({}, Core::Fields::AttributeKeys.fields([[:custom, "value"]]))
-    end
-
-    def test_from_reads_neutral_hash
-      assert_equal({ "url.path": "/" }, Core::Fields::AttributeKeys.from("url.path": "/"))
-    end
-
-    def test_from_returns_empty_hash_for_unusable_attributes
-      assert_equal({}, Core::Fields::AttributeKeys.from(nil))
-      assert_equal({}, Core::Fields::AttributeKeys.from({}))
-      assert_equal({}, Core::Fields::AttributeKeys.from("not-a-hash"))
     end
 
     def test_attribute_keys_document_all_neutral_keys

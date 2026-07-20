@@ -55,17 +55,19 @@ module Julewire
         end
 
         def apply_tail_option(options, value)
-          if (assignment = FLAGS[value])
+          case value
+          when *FLAGS.keys
+            assignment = FLAGS.fetch(value)
             options[assignment.fetch(0)] = assignment.fetch(1)
-          elsif value.start_with?("--format=")
-            options[:format] = value.delete_prefix("--format=").to_sym
-          elsif value == "--format"
+          when /\A--format=(.+)\z/
+            options[:format] = Regexp.last_match(1)
+          when "--format"
             options[:format] = next_symbol_option("--format")
-          elsif value == "--theme"
+          when "--theme"
             options[:theme] = next_symbol_option("--theme")
-          elsif value == "--limit"
+          when "--limit"
             options[:limit] = positive_integer_option("--limit")
-          elsif value == "--max-value-bytes"
+          when "--max-value-bytes"
             options[:max_value_bytes] = positive_integer_option("--max-value-bytes")
           else
             apply_path_option(options, value, command: "tail")
@@ -74,7 +76,7 @@ module Julewire
 
         def tail_renderer(options)
           encoder = console_text_encoder(options)
-          proc do |line, line_number|
+          lambda do |line, line_number|
             write_encoded_record_line(
               line,
               line_number,
@@ -87,13 +89,16 @@ module Julewire
 
         def tail_stdin(options, renderer)
           limit = options.fetch(:limit)
-          return render_limited_stdin(limit, renderer) if limit
-
-          render_stream(@stdin.each_line, renderer)
+          if limit
+            render_limited_stdin(limit, renderer)
+          else
+            render_stream(@stdin.each_line, renderer)
+          end
         end
 
         def tail_file(options, renderer)
-          File.open(options.fetch(:path), "r") do |file|
+          descriptor = IO.sysopen(options.fetch(:path))
+          IO.open(descriptor) do |file|
             line_number = render_file_snapshot(file, options, renderer)
             follow_file(file, line_number, options, renderer) if options.fetch(:follow)
           end
@@ -113,7 +118,7 @@ module Julewire
               render_entries([[line_number, line]], renderer)
             else
               line_number = reset_follow_position(file) if file.stat.size < file.pos
-              sleep(options.fetch(:poll_interval))
+              Kernel.sleep(options.fetch(:poll_interval))
             end
           end
         end
@@ -132,7 +137,7 @@ module Julewire
           line_number = 0
           lines.each do |line|
             line_number += 1
-            next if line.strip.empty?
+            next unless line.match?(/\S/)
 
             renderer.call(line, line_number)
           end

@@ -23,21 +23,22 @@ module Julewire
         def call
           options = doctor_options
           report = Julewire.doctor
-          options.fetch(:format) == :json ? write_json(report) : write_text(report, options)
+          if options[:format] == :text
+            write_text(report, options)
+          else
+            write_json(report)
+          end
           0
         end
 
         private
 
         def doctor_options
-          { color: color_output?, format: :json, theme: :plain }.tap do |options|
-            until @argv.empty?
-              value = @argv.shift
-              if (assignment = FLAGS[value])
-                apply_option(options, assignment)
-              else
-                raise ArgumentError, "unknown option #{value}"
-              end
+          @argv.each_with_object(color: color_output?) do |value, options|
+            if (assignment = FLAGS[value])
+              apply_option(options, assignment)
+            else
+              raise ArgumentError, "unknown option #{value}"
             end
           end
         end
@@ -46,7 +47,7 @@ module Julewire
           key = assignment.fetch(0)
           value = assignment.fetch(1)
           options[key] = value
-          options[:format] = :text if key == :theme && value == :punk
+          options[:format] = :text if value == :punk
         end
 
         def color_output?
@@ -59,18 +60,19 @@ module Julewire
         end
 
         def write_text(report, options)
-          theme = options.fetch(:theme)
+          theme = options[:theme]
           color = options.fetch(:color)
+          pipeline = report.fetch(:pipeline)
           lines = [
             title(theme),
             status_line(report, theme: theme, color: color),
             runtime_line(report.fetch(:runtime)),
-            pipeline_line(report.fetch(:pipeline)),
-            component_line("destinations", report.dig(:pipeline, :destinations) || {}),
+            pipeline_line(pipeline),
+            component_line("destinations", pipeline.fetch(:destinations)),
             component_line("runtime_integrations", report.fetch(:integrations)),
             component_line("process_integrations", report.fetch(:process_integrations)),
             warning_lines(report.fetch(:warnings), theme: theme)
-          ].flatten.compact
+          ]
           @stdout.write("#{lines.join("\n")}\n")
         end
 
@@ -108,7 +110,9 @@ module Julewire
           return "warnings=none" if warnings.empty?
 
           header = theme == :punk ? "!! warnings=#{warnings.length}" : "warnings=#{warnings.length}"
-          [header, *warnings.map { warning_line(it, theme: theme) }]
+          lines = [header]
+          warnings.each { lines << warning_line(it, theme: theme) }
+          lines
         end
 
         def warning_line(warning, theme:)
@@ -125,7 +129,7 @@ module Julewire
           return value unless color
 
           styles = severity_styles(theme)
-          "\e[#{styles.fetch(severity.to_s, styles.fetch("unknown"))}m#{value}\e[0m"
+          "\e[#{styles.fetch(severity)}m#{value}\e[0m"
         end
 
         def severity_for_status(status)

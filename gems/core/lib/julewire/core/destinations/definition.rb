@@ -43,7 +43,6 @@ module Julewire
             on_drop: resolve(:on_drop, defaults),
             on_failure: resolve(:on_failure, defaults),
             output: output,
-            error_backtrace_lines: defaults.fetch(:error_backtrace_lines),
             processors: resolve(:processors, defaults)
           )
         end
@@ -95,17 +94,10 @@ module Julewire
           return defaults.fetch(key) if defaults.key?(key)
 
           case key
-          when :close_output
-            false
-          when :encoder, :formatter, :on_drop, :on_failure
+          when :encoder, :formatter
             raise ArgumentError, "destination default #{key} is required"
           when :max_record_bytes
             DEFAULT_MAX_RECORD_BYTES
-          when :processors
-            []
-          when :output
-            # No inherited output exists; build raises the required-output error.
-            nil
           end
         end
 

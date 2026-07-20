@@ -35,12 +35,11 @@ module Julewire
           @prepare_values = !@transform.nil?
           @track_paths = @prepare_values && !track_paths.equal?(false)
         end
+        private_class_method :new
 
         def call(value)
           @root = value
           walk(value)
-        ensure
-          @root = nil
         end
 
         private
@@ -50,16 +49,7 @@ module Julewire
           transformed.equal?(CONTINUE) ? value : transformed
         end
 
-        def truncation_metadata(fields)
-          TruncationMetadata.build(
-            fields,
-            key_style: :symbol,
-            max_array_items: @max_array_items,
-            max_depth: @max_depth,
-            max_hash_keys: @max_hash_keys,
-            max_string_bytes: @max_string_bytes
-          )
-        end
+        def truncation_metadata(fields) = super(fields, key_style: :symbol)
       end
     end
   end

@@ -6,6 +6,7 @@ module Julewire
   class TestDestinationFactories < Minitest::Test
     cover Julewire::Core::Destinations::Definition
     cover Julewire::Core::Destinations::Registry
+    cover "Julewire::Core::Destinations::Definition#build"
 
     class FactoryDestination
       attr_reader :name, :records, :resource_identity
@@ -56,6 +57,25 @@ module Julewire
       end
     end
 
+    def test_destination_factory_registration_requires_block
+      error = assert_raises(ArgumentError) do
+        Julewire::Core::Destinations.register(:"missing_factory_#{object_id.abs}")
+      end
+
+      assert_equal "destination factory block required", error.message
+    end
+
+    def test_destination_factory_registration_normalizes_names_and_returns_nil
+      kind = "string_destination_#{object_id.abs}"
+      factory = ->(name:, **) { FactoryDestination.new(name) }
+
+      result = Julewire::Core::Destinations.register(kind, &factory)
+
+      assert_nil result
+      assert_same factory, Julewire::Core::Destinations.factory_for(kind)
+      assert_same factory, Julewire::Core::Destinations.factory_for(kind.to_sym)
+    end
+
     def test_registered_destination_factory_builds_destination_with_adapter_options
       kind = :"registered_destination_#{object_id.abs}"
       built = []
@@ -80,8 +100,6 @@ module Julewire
         built
       )
       assert_equal 1, Julewire.health.dig(:pipeline, :destinations, :factory_destination, :records)
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
     end
 
     def test_registered_destination_factory_uses_kind_as_default_name
@@ -101,8 +119,6 @@ module Julewire
 
       assert_equal [kind], built
       assert_equal 1, Julewire.health.dig(:pipeline, :destinations, kind, :records)
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
     end
 
     def test_registered_destination_factory_keeps_explicit_callbacks
@@ -127,8 +143,6 @@ module Julewire
       Julewire.emit(message: "work")
 
       assert_equal [[explicit_drop, explicit_failure]], built
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
     end
 
     def test_registered_destination_factory_rejects_shared_resource_identity
@@ -147,8 +161,6 @@ module Julewire
         "destination :two shares output with destination :one; use a transport adapter for shared sinks",
         error.message
       )
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
     end
 
     def test_registered_destination_factory_allows_distinct_resource_identities
@@ -165,8 +177,6 @@ module Julewire
 
       assert_equal 1, Julewire.health.dig(:pipeline, :destinations, :one, :records)
       assert_equal 1, Julewire.health.dig(:pipeline, :destinations, :two, :records)
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
     end
 
     def test_registered_destination_factory_accepts_destinations_without_resource_identity
@@ -180,8 +190,6 @@ module Julewire
 
       assert_equal 1, Julewire.health.dig(:pipeline, :destinations, :one, :records)
       assert_equal 1, Julewire.health.dig(:pipeline, :destinations, :two, :records)
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
     end
 
     def test_registered_destination_factory_does_not_require_callback_defaults
@@ -197,8 +205,25 @@ module Julewire
 
       assert_equal [kind], built
       assert_instance_of FactoryDestination, destination
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
+    end
+
+    def test_registered_destination_factory_direct_build_allows_missing_output_identity_tracking
+      kind = :"direct_without_identity_tracking_#{object_id.abs}"
+
+      Julewire::Core::Destinations.register(kind) { |name:, **| FactoryDestination.new(name) }
+
+      destination = Julewire::Core::Destinations::Definition.new(kind).build(
+        defaults: {},
+        output_identities: nil
+      )
+
+      assert_equal kind, destination.name
+    end
+
+    def test_destination_definition_freezes_owned_options
+      definition = Julewire::Core::Destinations::Definition.new(:default, output: StringIO.new)
+
+      assert_predicate definition.instance_variable_get(:@options), :frozen?
     end
 
     def test_registered_destination_factory_must_return_destination_contract
@@ -213,20 +238,19 @@ module Julewire
       end
 
       assert_equal "destination must respond to #name", error.message
-    ensure
-      Julewire::Testing.unregister_destination(kind) if kind
     end
 
-    def test_registered_destination_factory_can_be_removed
-      kind = :"temporary_destination_#{object_id.abs}"
+    def test_registered_destination_factory_direct_build_validates_returned_destination
+      kind = :"bad_direct_destination_factory_#{object_id.abs}"
 
-      Julewire::Core::Destinations.register(kind) { |name:, **| FactoryDestination.new(name) }
+      Julewire::Core::Destinations.register(kind) { "not a destination" }
 
-      assert_instance_of Proc, Julewire::Core::Destinations.factory_for(kind)
+      definition = Julewire::Core::Destinations::Definition.new(kind)
+      error = assert_raises(ArgumentError) do
+        definition.build(defaults: {}, output_identities: nil)
+      end
 
-      Julewire::Testing.unregister_destination(kind)
-
-      assert_nil Julewire::Core::Destinations.factory_for(kind)
+      assert_equal "destination must respond to #name", error.message
     end
 
     private

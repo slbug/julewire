@@ -13,7 +13,7 @@ module Julewire
 
         module ClassMethods
           def setting(name, default: nil, predicate: false, validate: nil, &block)
-            settings_defaults[name] = block || proc { default }
+            settings_defaults[name] = block || -> { default }
             settings_validators[name] = validate if validate
             ivar = :"@#{name}"
 
@@ -60,7 +60,7 @@ module Julewire
         end
 
         def setting_default(default)
-          Core::Fields::FieldSet.deep_dup(instance_exec(&default))
+          Fields::FieldSet.deep_dup(instance_exec(&default))
         end
 
         def validate_settings!
@@ -81,9 +81,9 @@ module Julewire
           case validator
           when Symbol
             validator_method = method(validator)
-            validator_method.arity == 1 ? validator_method.call(value) : validator_method.call(value, name)
+            validator_method.arity == 2 ? validator_method.call(value, name) : validator_method.call(value)
           else
-            validator.arity == 1 ? instance_exec(value, &validator) : instance_exec(value, name, &validator)
+            validator.arity == 2 ? instance_exec(value, name, &validator) : instance_exec(value, &validator)
           end
         end
       end

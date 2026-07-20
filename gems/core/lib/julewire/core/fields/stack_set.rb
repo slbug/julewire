@@ -4,13 +4,12 @@ module Julewire
   module Core
     module Fields
       class StackSet
-        EMPTY_HASH = {}.freeze
-        private_constant :EMPTY_HASH
-
         class << self
-          def inherit_from(source, inherit_attributes: true)
-            stacks = Bags.stack_sections.to_h do |section|
-              [section, inherited_stack(source, section, inherit_section?(section, inherit_attributes))]
+          def inherit_from(source, inherit_attributes:)
+            stacks = Bags.stack_sections.each_with_object({}) do |section, inherited|
+              next unless inherit_section?(section, inherit_attributes)
+
+              inherited[section] = source.stack(section).branch
             end
             new(**stacks)
           end
@@ -20,16 +19,12 @@ module Julewire
           def inherit_section?(section, inherit_attributes)
             inherit_attributes || !%i[attributes neutral].include?(section)
           end
-
-          def inherited_stack(source, section, inherit)
-            inherit ? source.stack(section).fork : FieldStack.new
-          end
         end
 
         def initialize(**sections)
           @stacks = Bags.stack_sections.to_h do |section|
-            [section, field_stack(sections.fetch(section, EMPTY_HASH), section)]
-          end.freeze
+            [section, field_stack(sections.fetch(section, nil), section)]
+          end
         end
 
         def stack(section)

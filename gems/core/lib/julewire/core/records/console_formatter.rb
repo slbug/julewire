@@ -9,13 +9,13 @@ module Julewire
           Record.validate_normalized!(record)
 
           {
-            event: record[:event],
-            labels: record[:labels],
+            event: record.fetch(:event),
+            labels: record.fetch(:labels),
             message: DisplayMessage.call(record),
-            payload: record[:payload],
-            severity: record[:severity],
-            source: record[:source],
-            timestamp: record[:timestamp]
+            payload: record.fetch(:payload),
+            severity: record.fetch(:severity),
+            source: record.fetch(:source),
+            timestamp: record.fetch(:timestamp)
           }
         end
       end

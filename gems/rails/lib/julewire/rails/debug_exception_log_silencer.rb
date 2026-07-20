@@ -5,9 +5,9 @@ require "action_dispatch/middleware/debug_exceptions"
 module Julewire
   module Rails
     module DebugExceptionLogSilencer
-      Patch = Module.new do
+      module Patch
         def log_error(request, wrapper)
-          return if Julewire::Rails::DebugExceptionLogSilencer.suppress?(request, wrapper)
+          return if DebugExceptionLogSilencer.suppress?
 
           super
         end
@@ -17,26 +17,11 @@ module Julewire
       class << self
         def install!(configuration)
           @configuration = configuration
-          return false unless defined?(::ActionDispatch::DebugExceptions)
-          return true if @installed
 
           ::ActionDispatch::DebugExceptions.prepend(Patch)
-          @installed = true
         end
 
-        def suppress?(_request, _wrapper)
-          suppress_reported_logs?
-        rescue StandardError => e
-          IntegrationHealth.record_failure(
-            e,
-            action: :suppress?,
-            component: :debug_exception_log_silencer
-          )
-        end
-
-        private
-
-        def suppress_reported_logs?
+        def suppress?
           configuration = @configuration
           return false unless configuration
 
@@ -46,6 +31,12 @@ module Julewire
           else
             !configuration.reported_exception_logs
           end
+        rescue StandardError => e
+          IntegrationHealth.record_failure(
+            e,
+            action: :suppress?,
+            component: :debug_exception_log_silencer
+          )
         end
       end
     end

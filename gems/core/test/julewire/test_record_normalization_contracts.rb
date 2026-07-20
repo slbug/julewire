@@ -6,8 +6,12 @@ require "stringio"
 
 module Julewire
   class TestRecordNormalizationContracts < Minitest::Test
+    cover "Julewire::Core::Diagnostics::InvalidSeverityReporter.call"
+    cover "Julewire::Core::Diagnostics::InvalidSeverityReporter.warning_only"
     cover Julewire::Core::Records::Record
-    cover Julewire::Core::Serialization::ValueCopy
+    cover Julewire::Core::Records::Draft
+    cover "Julewire::Core::Records::Draft::Builder*"
+    cover "Julewire::Core::Records::Deconstruct#deconstruct_keys"
 
     class CapturingFormatter
       attr_reader :record
@@ -34,8 +38,11 @@ module Julewire
       record = JSON.parse(output.string)
 
       refute_equal "julewire.processor_error", record.fetch("event")
-      refute record.dig("payload", "processed")
+      assert_nil record.dig("payload", "processed")
       assert_equal 0, pipeline.health.dig(:counts, :processor_error)
+      assert_equal 1, pipeline.health.dig(:counts, :processor_invalid)
+      assert_equal :processor_result, pipeline.health.dig(:last_failure, :phase)
+      assert_equal "Hash", pipeline.health.dig(:last_failure, :result_class)
     end
 
     def test_emit_defaults_bad_record_severity_to_info
@@ -57,20 +64,33 @@ module Julewire
 
     def test_record_draft_defaults_invalid_explicit_severity_to_info
       record = nil
-      capture_io do
+      _stdout, stderr = capture_io do
         record = Julewire::Core::Records::Draft.build({ severity: :bogus }, context: {}, scope: nil)
       end
 
       assert_equal :info, record.fetch(:severity)
+      assert_includes stderr, "unsupported record severity Symbol"
+    end
+
+    def test_record_normalizes_nil_input_and_non_exception_errors
+      nil_record = build_record(nil, context: {}, scope: nil)
+      string_error_record = build_record({ error: "boom" }, context: {}, scope: nil)
+      nil_backtrace_record = build_record({ error: RuntimeError.new("boom") }, context: {}, scope: nil)
+
+      assert_equal "log", nil_record[:event]
+      assert_nil nil_record[:message]
+      assert_equal({ message: "boom" }, string_error_record[:error])
+      assert_nil nil_backtrace_record.dig(:error, :backtrace)
     end
 
     def test_record_draft_defaults_non_stringable_explicit_severity_to_info
       record = nil
-      capture_io do
+      _stdout, stderr = capture_io do
         record = Julewire::Core::Records::Draft.build({ severity: Object.new }, context: {}, scope: nil)
       end
 
       assert_equal :info, record.fetch(:severity)
+      assert_includes stderr, "unsupported record severity Object"
     end
 
     def test_record_from_normalized_hash_rejects_non_hash_values
@@ -82,6 +102,36 @@ module Julewire
         normalized_record.merge("payload" => {}),
         "record must not use string keys"
       )
+    end
+
+    def test_record_from_normalized_hash_rejects_non_symbol_keys
+      assert_record_from_normalized_hash_rejects(
+        normalized_record(payload: { Object.new => true }),
+        "record keys must be Symbols"
+      )
+    end
+
+    def test_raw_record_input_rejects_object_keys
+      error = assert_raises(TypeError) do
+        Julewire::Core::Records::Draft.build({ Object.new => true }, context: {}, scope: nil)
+      end
+
+      assert_equal "field keys must be String or Symbol", error.message
+    end
+
+    def test_raw_record_input_rejects_object_keys_before_traversing_values
+      value = Object.new
+      def value.is_a?(klass)
+        raise "value should not be traversed before key validation" if [Hash, Array].include?(klass)
+
+        super
+      end
+
+      error = assert_raises(TypeError) do
+        Julewire::Core::Fields::FieldSet.deep_symbolize_keys(Object.new => value)
+      end
+
+      assert_equal "field keys must be String or Symbol", error.message
     end
 
     def test_record_from_normalized_hash_rejects_unknown_top_level_keys
@@ -119,11 +169,11 @@ module Julewire
       record_shaped_object = Struct.new(:serializable_data).new(first.serializable_data)
 
       assert_equal first, second
-      assert first.eql?(second)
+      assert_eql first, second
       refute_equal first, different
-      refute first.eql?(different)
+      refute_eql first, different
       refute_equal first, record_shaped_object
-      refute first.eql?(record_shaped_object)
+      refute_eql first, record_shaped_object
       assert_equal first.hash, second.hash
       assert_equal "stored", { first => "stored" }.fetch(second)
       refute_equal first.to_h, first
@@ -171,6 +221,44 @@ module Julewire
       assert_equal ["one"], draft.dig(:payload, :ids)
     end
 
+    def test_record_and_draft_deconstruct_keys_select_requested_existing_keys
+      record = Julewire::Core::Records::Record.from_normalized_hash(normalized_record(payload: { ids: ["one"] }))
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record(payload: { ids: ["one"] }))
+
+      record_match = record.deconstruct_keys(%i[payload missing])
+      draft_match = draft.deconstruct_keys(%i[payload missing])
+
+      assert_equal({ payload: { ids: ["one"] } }, record_match)
+      assert_equal({ payload: { ids: ["one"] } }, draft_match)
+      refute_includes record_match, :missing
+      refute_includes draft_match, :missing
+
+      record_match.fetch(:payload).fetch(:ids) << "two"
+      draft_match.fetch(:payload).fetch(:ids) << "two"
+
+      assert_equal ["one"], record.dig(:payload, :ids)
+      assert_equal ["one"], draft.dig(:payload, :ids)
+    end
+
+    def test_record_and_draft_deconstruct_keys_without_requested_keys_return_full_defensive_hash
+      record = Julewire::Core::Records::Record.from_normalized_hash(normalized_record(payload: { ids: ["one"] }))
+      draft = Julewire::Core::Records::Draft.from_normalized_hash(normalized_record(payload: { ids: ["one"] }))
+
+      record_hash = record.deconstruct_keys(nil)
+      draft_hash = draft.deconstruct_keys(nil)
+
+      assert_equal record.to_h, record_hash
+      assert_equal draft.to_h, draft_hash
+
+      record_hash.fetch(:payload).fetch(:ids) << "two"
+      draft_hash.fetch(:payload).fetch(:ids) << "two"
+
+      assert_equal %w[one two], record_hash.dig(:payload, :ids)
+      assert_equal %w[one two], draft_hash.dig(:payload, :ids)
+      assert_equal ["one"], record.dig(:payload, :ids)
+      assert_equal ["one"], draft.dig(:payload, :ids)
+    end
+
     def test_record_from_normalized_hash_rejects_scalar_sections
       assert_record_from_normalized_hash_rejects(
         normalized_record(payload: "not normalized"),
@@ -209,8 +297,7 @@ module Julewire
 
     def test_record_draft_update_freezes_when_finalized
       draft = Julewire::Core::Records::Draft.from_normalized_hash(
-        normalized_record(payload: { value: "before" }),
-        freeze_sections: false
+        normalized_record(payload: { value: "before" })
       )
 
       draft[:labels] = { tenant: "tenant-1" }

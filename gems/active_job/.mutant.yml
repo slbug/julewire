@@ -1,0 +1,21 @@
+---
+usage: opensource
+includes:
+- lib
+- test
+- "../../support/mutant"
+requires:
+- mutant
+- ruby_itblock
+- minitest_coverage
+- rails
+- julewire-active_job
+hooks:
+- "../../support/mutant/zeitwerk_eager_load.rb"
+integration:
+  name: minitest
+coverage_criteria:
+  process_abort: true
+matcher:
+  subjects:
+  - Julewire::ActiveJob*

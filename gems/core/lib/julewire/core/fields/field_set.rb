@@ -5,16 +5,22 @@ module Julewire
     module Fields
       # @api integration_spi
       module FieldSet
+        Serializer = Serialization::Serializer
+        TRUNCATION_METADATA_KEY = Serializer::TRUNCATION_METADATA_KEY.to_sym
+        RESERVED_TRUNCATION_METADATA_ERROR =
+          "#{Serializer::TRUNCATION_METADATA_KEY} is reserved for Julewire truncation metadata".freeze
+        INVALID_MODES = %i[ignore raise wrap].freeze
         VALUE_KEY = :value
+        private_constant :Serializer, :TRUNCATION_METADATA_KEY, :RESERVED_TRUNCATION_METADATA_ERROR, :INVALID_MODES
 
         class << self
           # Public ingress accepts String or Symbol keys. Core stores Symbol keys
           # after normalization so extension contracts stay simple.
-          def coerce(fields = nil, keyword_fields = {}, invalid: :ignore)
+          def coerce(fields = nil, keyword_fields = nil, invalid: :ignore)
+            validate_invalid_mode!(invalid)
             coerced = {}
             coerce_fields!(coerced, fields, invalid: invalid) unless fields.nil?
-            merge!(coerced, keyword_fields) unless keyword_fields.empty?
-            coerced
+            merge!(coerced, keyword_fields)
           end
 
           def merge(left, right)
@@ -25,7 +31,7 @@ module Julewire
             return target unless fields.is_a?(Hash)
 
             fields.each do |key, value|
-              target[Fields::Internal.normalize_key(key)] = copy_field_value(value)
+              target[normalized_field_key(key)] = copy_field_value(value)
             end
 
             target
@@ -48,24 +54,18 @@ module Julewire
           end
 
           def frozen_copy(value)
-            Fields::Internal.frozen_copy(value)
+            Internal.frozen_copy(value)
           end
 
           def value_for(hash, key, default: nil)
             return default unless hash.is_a?(Hash)
 
-            normalized = key.is_a?(String) ? Fields::Internal.normalize_key(key) : key
-            return hash[normalized] if hash.key?(normalized)
-
-            default
+            hash.fetch(Internal.normalize_key(key), default)
           end
 
           private
 
           def deep_dup_with(value, preserve_truncation_metadata:)
-            return {} if value.is_a?(Hash) && value.empty?
-            return [] if value.is_a?(Array) && value.empty?
-
             Serialization::ValueCopy.call(
               value,
               preserve_truncation_metadata: preserve_truncation_metadata
@@ -73,14 +73,11 @@ module Julewire
           end
 
           def deep_symbolize_keys_with(value, preserve_truncation_metadata:)
-            return {} if value.is_a?(Hash) && value.empty?
-            return [] if value.is_a?(Array) && value.empty?
-
             Serialization::ValueCopy.call(
               value,
-              max_array_items: Serialization::Serializer::DEFAULT_MAX_ARRAY_ITEMS,
-              max_hash_keys: Serialization::Serializer::DEFAULT_MAX_HASH_KEYS,
-              max_string_bytes: Serialization::Serializer::DEFAULT_MAX_STRING_BYTES,
+              max_array_items: Serializer::DEFAULT_MAX_ARRAY_ITEMS,
+              max_hash_keys: Serializer::DEFAULT_MAX_HASH_KEYS,
+              max_string_bytes: Serializer::DEFAULT_MAX_STRING_BYTES,
               preserve_truncation_metadata: preserve_truncation_metadata,
               symbolize_keys: true
             )
@@ -90,10 +87,23 @@ module Julewire
             if fields.is_a?(Hash)
               merge!(target, fields)
             elsif invalid == :wrap
-              target[VALUE_KEY] = deep_dup(fields)
+              target[VALUE_KEY] = copy_field_value(fields)
             elsif invalid == :raise
               raise ArgumentError, "fields must be a Hash"
             end
+          end
+
+          def validate_invalid_mode!(invalid)
+            return if INVALID_MODES.include?(invalid)
+
+            raise ArgumentError, "invalid field coercion mode: #{invalid.inspect}"
+          end
+
+          def normalized_field_key(key)
+            normalized_key = Internal.normalize_key(key)
+            raise ArgumentError, RESERVED_TRUNCATION_METADATA_ERROR if normalized_key == TRUNCATION_METADATA_KEY
+
+            normalized_key
           end
 
           def copy_field_value(value) = deep_symbolize_keys(value)

@@ -6,6 +6,8 @@ require "rack/mock"
 module Julewire
   module Rails
     module TestHelpers
+      include Julewire::TestSupport::MethodOverride
+
       Event = Data.define(:payload)
 
       def configure_output(captured: nil)
@@ -28,6 +30,33 @@ module Julewire
         output.string.lines.map { JSON.parse(it) }
       end
 
+      def call_and_close(middleware, env)
+        response = middleware.call(env)
+        response[2].close if response[2].respond_to?(:close)
+        response
+      end
+
+      def action_dispatch_request(path)
+        ::ActionDispatch::Request.new(::Rack::MockRequest.env_for(path))
+      end
+
+      def rails_exception_env_for(path)
+        ::Rack::MockRequest.env_for(path).tap do |env|
+          env["action_dispatch.debug_exception_log_level"] = ::Logger::ERROR
+          env["action_dispatch.backtrace_cleaner"] = ActiveSupport::BacktraceCleaner.new
+        end
+      end
+
+      def report_dispatch_error(subscriber, error, path:)
+        subscriber.report(
+          error,
+          handled: false,
+          severity: :error,
+          context: { path: path },
+          source: "application.action_dispatch"
+        )
+      end
+
       def with_fake_rails_application_filter_parameters(filters, &)
         config = Data.define(:filter_parameters).new(filters)
         app = Data.define(:config).new(config)
@@ -35,8 +64,54 @@ module Julewire
         with_overridden_singleton_method(::Rails, :application, proc { app }, &)
       end
 
-      def with_overridden_singleton_method(receiver, method_name, replacement, &)
-        Julewire::Core::Testing.with_overridden_singleton_method(receiver, method_name, replacement, &)
+      def reset_rails_lifecycle_hooks
+        Julewire::Rails::LifecycleHooks.instance_variable_set(:@at_exit_installed, false)
+        Julewire::Rails::LifecycleHooks.instance_variable_set(:@fork_tracker_installed, false)
+      end
+
+      def reset_request_summary_timeout_scheduler
+        Julewire::Rails::RequestSummaryTimeoutScheduler.after_fork!
+      end
+
+      def with_temporary_constant(owner, name, value)
+        existed = owner.const_defined?(name, false)
+        previous = owner.const_get(name, false) if existed
+        owner.__send__(:remove_const, name) if existed
+        owner.const_set(name, value)
+        yield
+      ensure
+        owner.__send__(:remove_const, name) if owner.const_defined?(name, false)
+        owner.const_set(name, previous) if existed
+      end
+
+      alias with_constant with_temporary_constant
+
+      def with_shadowed_nested_rails_support(&)
+        event_reporter = Module.new do
+          def self.default = raise "nested RailsSupport must not be used"
+          def self.subscribable?(_reporter) = raise "nested RailsSupport must not be used"
+          def self.subscribe(*) = raise "nested RailsSupport must not be used"
+        end
+
+        with_shadowed_rails_namespace(:RailsSupport, :EventReporter, event_reporter, &)
+      end
+
+      def with_shadowed_active_support_execution_state(&)
+        execution_state = Module.new do
+          def self.[](_key)
+            raise "nested ActiveSupport execution state read"
+          end
+
+          def self.[]=(_key, _value)
+            raise "nested ActiveSupport execution state write"
+          end
+
+          def self.delete(_key)
+            raise "nested ActiveSupport execution state delete"
+          end
+        end
+
+        with_shadowed_rails_namespace(:ActiveSupport, :IsolatedExecutionState, execution_state, &)
       end
 
       def emitting_app
@@ -73,35 +148,6 @@ module Julewire
           tags: {},
           context: {}
         )
-      end
-
-      def expected_controller_summary_fields
-        {
-          kind: "summary",
-          event: "request.completed",
-          controller: "HomeController",
-          action: "index",
-          format: "HTML",
-          status: 200,
-          db_runtime: 1.2,
-          action_runtime_ms: 4.56,
-          has_duration_ms: false
-        }
-      end
-
-      def controller_summary_fields(summary)
-        attributes = summary.fetch("attributes").fetch("rails")
-        {
-          kind: summary.fetch("kind"),
-          event: summary.fetch("event"),
-          controller: attributes.fetch("controller"),
-          action: attributes.fetch("action"),
-          format: attributes.fetch("format"),
-          status: attributes.fetch("status"),
-          db_runtime: attributes.fetch("db_runtime"),
-          action_runtime_ms: attributes.fetch("action_runtime_ms"),
-          has_duration_ms: attributes.key?("duration_ms")
-        }
       end
 
       def capture_controller_response_summary(response, limit: 65_536, **options)
@@ -142,6 +188,13 @@ module Julewire
         options.each do |key, value|
           capture.public_send("#{key}=", value)
         end
+      end
+
+      def with_shadowed_rails_namespace(name, nested_name, nested_value, &)
+        namespace = Module.new
+        namespace.const_set(nested_name, nested_value)
+
+        with_temporary_constant(Julewire::Rails, name, namespace, &)
       end
 
       class FakeMiddlewareStack

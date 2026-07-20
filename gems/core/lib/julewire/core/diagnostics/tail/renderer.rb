@@ -27,7 +27,7 @@ module Julewire
 
           def payload_for(entry)
             record = entry.record
-            record.merge("timestamp" => record["timestamp"] || entry.at.iso8601(6))
+            record.merge("timestamp" => record["timestamp"] || entry.at)
           end
         end
       end

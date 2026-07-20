@@ -9,7 +9,7 @@ module Julewire
           values = Core::Integration::Values::Shape
           {}.tap do |fields|
             values.append_field(fields, :request_id, request.id)
-            values.append_field(fields, :http_method, request.method)
+            values.append_field(fields, :http_method, request.request_method)
             values.append_field(fields, :path, request.path)
             values.append_field(fields, :remote_ip, request.remote_ip)
           end
@@ -26,16 +26,8 @@ module Julewire
           }
         end
 
-        def rendered_error_summary(request, rendered_error, status:)
-          error_summary(
-            request,
-            rendered_error.fetch(:error),
-            status: status,
-            wrapper: nil
-          ).tap do |fields|
-            fields[:attributes][:rails][:rescue_response] = rendered_error[:rescue_response]
-            fields[:attributes][:rails][:rescue_template] = rendered_error[:rescue_template]
-          end
+        def rendered_error_details(rendered_error)
+          apply_rendered_error_metadata(error_details(rendered_error.fetch(:error), wrapper: nil), rendered_error)
         end
 
         def error_summary(request, error, status:, wrapper:)
@@ -45,8 +37,21 @@ module Julewire
           }
         end
 
+        def error_details(error, wrapper:)
+          {
+            attributes: { rails: rails_exception_attributes(error, wrapper: wrapper) },
+            neutral: {}
+          }
+        end
+
         def request_id(request)
           request_fields(request).id
+        end
+
+        # Rack headers and parsed bodies are user input. Normalize them before
+        # passing adapter-owned records to the core integration boundary.
+        def normalize_user_fields(fields)
+          Core::Fields::FieldSet.deep_symbolize_keys(fields)
         end
 
         private
@@ -58,7 +63,7 @@ module Julewire
           values.append_field(
             fields,
             Core::Fields::AttributeKeys::HTTP_REQUEST_METHOD,
-            request.method
+            request.request_method
           )
           values.append_field(fields, Core::Fields::AttributeKeys::URL_FULL, request.filtered_url)
           values.append_field(fields, Core::Fields::AttributeKeys::URL_PATH, request.path)
@@ -82,11 +87,27 @@ module Julewire
         def rails_error_attributes(request, error, status:, wrapper:)
           rails_request_attributes(request).tap do |rails|
             values = Core::Integration::Values::Shape
-            values.append_field(rails, :error_class, error.class.name)
             values.append_field(rails, :status, status)
-            values.append_field(rails, :rescue_response, rescue_response?(wrapper))
-            values.append_field(rails, :rescue_template, rescue_template(wrapper))
+            rails_exception_attributes(error, wrapper: wrapper).each do |key, value|
+              values.append_field(rails, key, value)
+            end
           end
+        end
+
+        def rails_exception_attributes(error, wrapper:)
+          values = Core::Integration::Values::Shape
+          {}.tap do |fields|
+            values.append_field(fields, :error_class, error.class.name)
+            values.append_field(fields, :rescue_response, rescue_response?(wrapper))
+            values.append_field(fields, :rescue_template, rescue_template(wrapper))
+          end
+        end
+
+        def apply_rendered_error_metadata(fields, rendered_error)
+          rails = fields.fetch(:attributes).fetch(:rails)
+          rails[:rescue_response] = rendered_error[:rescue_response]
+          rails[:rescue_template] = rendered_error[:rescue_template]
+          fields
         end
 
         def rails_request_attributes(request)
@@ -95,7 +116,7 @@ module Julewire
           {}.tap do |fields|
             values.append_field(fields, :filtered_url, request.filtered_url)
             values.append_field(fields, :filtered_path, request.filtered_path)
-            values.append_field(fields, :request_method, request.method)
+            values.append_field(fields, :request_method, request.request_method)
             values.append_field(fields, :path, request.path)
             values.append_field(fields, :user_agent, request.user_agent)
           end

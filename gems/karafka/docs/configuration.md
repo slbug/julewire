@@ -2,6 +2,15 @@
 
 ## Default Path
 
+Install consumer hooks with an explicit monitor or app:
+
+```ruby
+Julewire::Karafka.install!(monitor: Karafka.monitor)
+```
+
+`install!` does not discover a global Karafka app. Passing the monitor keeps the
+integration bound to the app instance being configured.
+
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `enabled` | `true` | Install the integration. |
