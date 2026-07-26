@@ -4,8 +4,35 @@ require "bundler/gem_tasks"
 require "rbconfig"
 require "minitest/test_task"
 
+ruby_three_four_coverage = ENV.key?("COVERAGE") && RUBY_VERSION.start_with?("3.4.")
+ractor_test_pattern = "/local_storage_ractor_/"
+
 Minitest::TestTask.create do |test|
   test.framework = %(require "test_helper")
+  test.extra_args.push("--exclude", ractor_test_pattern) if ruby_three_four_coverage
+end
+
+if ruby_three_four_coverage
+  # Ruby 3.4 can stop recording Coverage events after the first Ractor is created:
+  # https://bugs.ruby-lang.org/issues/20158
+  Rake::Task[:test].enhance do
+    sh(
+      {
+        "A" => nil,
+        "COVERAGE" => nil,
+        "E" => nil,
+        "FILTER" => nil,
+        "I" => nil,
+        "N" => ractor_test_pattern,
+        "TESTOPTS" => nil,
+        "X" => nil
+      },
+      RbConfig.ruby,
+      "-rbundler/setup",
+      Gem.bin_path("rake", "rake"),
+      "test"
+    )
+  end
 end
 
 require "rubocop/rake_task"
