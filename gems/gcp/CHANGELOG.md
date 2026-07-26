@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.1 - 2026-07-26
+
+- Refresh the tested dependency lockset.
+
 ## 1.1.0 - 2026-07-20
 
 - Keep Cloud Logging formatting and decoding aligned with the core record field
