@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.1 - 2026-07-26
+
+- Refresh the tested dependency lockset.
+
 ## 1.1.0 - 2026-07-20
 
 - Match path filters against both section-prefixed and section-relative paths.

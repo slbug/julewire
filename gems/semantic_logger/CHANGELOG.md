@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.1 - 2026-07-26
+
+- Test against Semantic Logger 5.1 and refresh the dependency lockset.
+
 ## 1.1.0 - 2026-07-20
 
 - Support Semantic Logger 4 and 5 async option shapes.
