@@ -114,7 +114,7 @@ GEM
       builder
       minitest (>= 5.0, < 7)
       ruby-progressbar
-    minitest-strict (1.0.0)
+    minitest-strict (1.0.1)
       minitest (>= 5.21, < 7)
     mocha (3.1.0)
       ruby2_keywords (>= 0.0.5)
@@ -282,7 +282,7 @@ CHECKSUMS
   mini_portile2 (2.8.9) sha256=0cd7c7f824e010c072e33f68bc02d85a00aeb6fce05bb4819c03dfd3c140c289
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   minitest-reporters (1.8.0) sha256=8ce5280fb73ad3178ae525454df169b6f28c1b38b1d088ea91815d3a370ba384
-  minitest-strict (1.0.0) sha256=a3585876a0da78dfb9c73e7d905ece94ff4b11c0e624a23472e28ed96095ec1f
+  minitest-strict (1.0.1) sha256=5bf179ed48c21013575cc00506be3fd6ceec8529636ce6897468f9574004ae06
   mocha (3.1.0) sha256=75f42d69ebfb1f10b32489dff8f8431d37a418120ecdfc07afe3bc183d4e1d56
   mutant (0.16.3) sha256=7e10fb09b80a78d82f8e38283fc1e4d562cbb1392451e2a21611ea2bc44b5023
   mutant-minitest (0.16.3) sha256=504d110c1bd503528a7e57a4f062960e571bba4e3939e4a66ddc0f75d2071d90
