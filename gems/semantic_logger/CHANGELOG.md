@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.2 - 2026-08-02
+
+- Refresh development and compatibility dependency locksets.
+
 ## 1.1.1 - 2026-07-26
 
 - Test against Semantic Logger 5.1 and refresh the dependency lockset.
