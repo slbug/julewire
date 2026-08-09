@@ -392,6 +392,14 @@ module Julewire
       Julewire::Ractor::PortLifecycle.close(ack_port) if ack_port
     end
 
+    def test_worker_quiesce_stops_without_closing_owned_output
+      output = WorkerOutput.new
+
+      run_worker(output: output, commands: [{ command: :quiesce_worker }])
+
+      assert_empty output.calls
+    end
+
     def test_worker_contains_owned_output_close_failures
       output = WorkerOutput.new(close_error: RuntimeError.new("close failed"))
 

@@ -121,10 +121,14 @@ module Julewire
   end
 
   class ForkAwareOutput < WriteOnlyOutput
-    attr_reader :after_fork_count
+    attr_reader :after_fork_count, :before_fork_timeout
 
     def after_fork!
       @after_fork_count = after_fork_count.to_i + 1
+    end
+
+    def before_fork!(timeout: nil)
+      @before_fork_timeout = timeout
     end
   end
 
@@ -273,6 +277,14 @@ module Julewire
       assert_equal 1, raw_output.after_fork_count
     end
 
+    def test_synchronized_output_forwards_before_fork_timeout
+      raw_output = ForkAwareOutput.new
+      output = Julewire::Core::Destinations::SynchronizedOutput.new(raw_output)
+
+      assert_same output, output.before_fork!(timeout: 0.25)
+      assert_in_delta 0.25, raw_output.before_fork_timeout
+    end
+
     def test_config_close_output_controls_output_ownership
       caller_owned = CloseableOutput.new
       julewire_owned = CloseableOutput.new
@@ -329,6 +341,8 @@ module Julewire
       assert_equal 1, raw_output.close_count
       assert_same pass_through, pass_through.after_fork!
       assert_equal 1, raw_output.after_fork_count
+      assert_same pass_through, pass_through.before_fork!(timeout: 0.25)
+      assert_in_delta 0.25, raw_output.before_fork_timeout
     end
 
     def test_chaos_output_pass_through_returns_delegate_result

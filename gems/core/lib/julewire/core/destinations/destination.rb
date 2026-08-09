@@ -84,6 +84,11 @@ module Julewire
           self
         end
 
+        def before_fork!(timeout: nil)
+          @output.before_fork!(timeout: timeout) if @output.respond_to?(:before_fork!)
+          self
+        end
+
         def resource_identity
           @output.resource_identity
         end

@@ -50,10 +50,35 @@ module Julewire
       end
     end
 
+    class BeforeForkDestination < ForkingDestination
+      attr_reader :before_fork_timeout
+
+      def before_fork!(timeout: nil)
+        @before_fork_timeout = timeout
+        self
+      end
+    end
+
     class RaisingAfterForkDestination < CapturingDestination
       def after_fork!
         raise "after fork failed"
       end
+    end
+
+    class UnsafeAfterForkDestination < CapturingDestination
+      def after_fork!
+        raise Julewire::Core::UnsafeForkError, "unsafe"
+      end
+    end
+
+    class RejectingBeforeForkDestination < CapturingDestination
+      def initialize
+        super
+        @flush_result = false
+      end
+
+      def before_fork!(**) = self
+      def flush(**) = @flush_result
     end
 
     class RaisingDestination
@@ -700,6 +725,18 @@ module Julewire
       assert_nil plain_sampler.health[:last_failure]
     end
 
+    def test_tail_sampling_before_fork_drains_buffers_and_prepares_destination
+      destination = BeforeForkDestination.new
+      sampler = Julewire::TailSampling.new(destination: destination, sample_rate: 1)
+      sampler.emit(build_record({ message: "pending", execution: { type: :job, id: "job-1" } }))
+
+      assert_same sampler, sampler.before_fork!(timeout: 0.25)
+
+      assert_equal 1, destination.records.length
+      assert_operator destination.before_fork_timeout, :<=, 0.25
+      assert_equal 0, sampler.health.fetch(:buffered_executions)
+    end
+
     def test_tail_sampling_after_fork_contains_destination_failures
       sampler = Julewire::TailSampling.new(destination: RaisingAfterForkDestination.new, sample_rate: 1)
       sampler.emit(build_record({ message: "pending", execution: { type: :job, id: "job-1" } }))
@@ -712,6 +749,22 @@ module Julewire
       assert_equal :degraded, health.fetch(:status)
       assert_equal "RuntimeError", health.dig(:last_failure, :class)
       assert_equal :after_fork, health.dig(:last_failure, :phase)
+    end
+
+    def test_tail_sampling_after_fork_propagates_unsafe_fork_errors
+      sampler = Julewire::TailSampling.new(destination: UnsafeAfterForkDestination.new, sample_rate: 1)
+
+      error = assert_raises(Julewire::Core::UnsafeForkError) { sampler.after_fork! }
+
+      assert_equal "unsafe", error.message
+    end
+
+    def test_tail_sampling_before_fork_rejects_a_failed_drain
+      sampler = Julewire::TailSampling.new(destination: RejectingBeforeForkDestination.new, sample_rate: 1)
+
+      error = assert_raises(Julewire::Core::Error) { sampler.before_fork! }
+
+      assert_equal "tail-sampling destination could not flush before fork", error.message
     end
 
     def test_tail_sampling_after_fork_waits_for_an_active_sampling_decision

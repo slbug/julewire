@@ -2,6 +2,9 @@
 
 ## 1.1.3 - 2026-08-09
 
+- Quiesce destination workers before process forks and reject forks with live
+  Ractors instead of rebuilding unsafe inherited VM state.
+- Require julewire-core 1.1.3.
 - Refresh development tooling and compatibility locksets.
 
 ## 1.1.2 - 2026-08-02
@@ -18,8 +21,7 @@
   shutdown so lifecycle operations cannot wait forever.
 - Harden queue accounting, fanout validation, worker stats, and Ractor-safe
   reply-timeout cleanup.
-- Discard inherited Ractor handles before rebuilding destination workers in a
-  forked child process.
+- Rebuild pre-fork-quiesced destination workers in forked child processes.
 - Normalize application emit input before strict bridge serialization while
   keeping integration-owned emits on a non-normalizing Symbol-key path.
 - Require julewire-core 1.1.0.

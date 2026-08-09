@@ -88,6 +88,7 @@ API_TAG_REQUIREMENTS = {
     "NullOutput" => "extension",
     "Testing" => "extension"
   },
+  "gems/core/lib/julewire/core/unsafe_fork_error.rb" => { "UnsafeForkError" => "integration_spi" },
   "gems/core/lib/julewire/core/validation.rb" => { "Validation" => "integration_spi" }
 }.freeze
 INTEGRATION_GEM_DIRS = (GEM_DIRS - ["gems/core"]).freeze
@@ -232,6 +233,7 @@ CORE_PUBLIC_ALIAS_PREFIXES = %w[
   Julewire::TailSampling
   Julewire::Testing
   Julewire::TextEncoder
+  Julewire::UnsafeForkError
 ].freeze
 CORE_SPI_ALLOWED_PREFIXES = %w[
   Core::CLI::LogFormats
@@ -256,6 +258,7 @@ CORE_SPI_ALLOWED_PREFIXES = %w[
   Core::Serialization::BoundedTransform
   Core::Serialization::EncodingSanitizer
   Core::UNSET
+  Core::UnsafeForkError
   Core::Validation
 ].freeze
 CORE_BRIDGE_ALLOWED_PREFIXES = %w[

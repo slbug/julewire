@@ -190,8 +190,8 @@ module Julewire
     include RactorRecordHelper
 
     class DestinationProbe
-      attr_reader :close_timeout, :emitted, :flush_timeout, :forks, :health_calls, :name
-      attr_writer :emit_error, :flush_error, :fork_error
+      attr_reader :before_fork_timeout, :close_timeout, :emitted, :flush_timeout, :forks, :health_calls, :name
+      attr_writer :before_fork_error, :emit_error, :flush_error, :fork_error
 
       def initialize(
         name:,
@@ -244,6 +244,13 @@ module Julewire
         self
       end
 
+      def before_fork!(timeout: nil)
+        @before_fork_timeout = timeout
+        raise @before_fork_error if @before_fork_error
+
+        self
+      end
+
       def health
         @health_calls += 1
         raise @health_error if @health_error
@@ -254,6 +261,10 @@ module Julewire
 
     class NoForkDestinationProbe < DestinationProbe
       undef_method :after_fork!
+    end
+
+    class NoBeforeForkDestinationProbe < DestinationProbe
+      undef_method :before_fork!
     end
 
     def test_ractor_fanout_defaults_name_and_resource_identity
@@ -545,6 +556,42 @@ module Julewire
       assert_same fanout, fanout.after_fork!
 
       assert_equal :ok, fanout.health.fetch(:status)
+    end
+
+    def test_ractor_fanout_after_fork_propagates_unsafe_fork_errors
+      error = Julewire::Core::UnsafeForkError.new("unsafe")
+      destination = DestinationProbe.new(name: :worker, fork_error: error)
+      fanout = Julewire::Ractor::Fanout.new(destinations: [destination])
+
+      raised = assert_raises(Julewire::Core::UnsafeForkError) { fanout.after_fork! }
+
+      assert_same error, raised
+    end
+
+    def test_ractor_fanout_before_fork_forwards_a_shared_deadline
+      first = DestinationProbe.new(name: :first)
+      second = DestinationProbe.new(name: :second)
+      plain = NoBeforeForkDestinationProbe.new(name: :plain)
+      fanout = Julewire::Ractor::Fanout.new(destinations: [first, second, plain])
+
+      assert_same fanout, fanout.before_fork!(timeout: 0.25)
+
+      assert_operator first.before_fork_timeout, :<=, 0.25
+      assert_operator second.before_fork_timeout, :<=, first.before_fork_timeout
+      assert_nil plain.before_fork_timeout
+    end
+
+    def test_ractor_fanout_before_fork_failure_resumes_prepared_destinations
+      first = DestinationProbe.new(name: :first)
+      second = DestinationProbe.new(name: :second)
+      second.before_fork_error = RuntimeError.new("unsafe")
+      fanout = Julewire::Ractor::Fanout.new(destinations: [first, second])
+
+      error = assert_raises(RuntimeError) { fanout.before_fork! }
+
+      assert_equal "unsafe", error.message
+      assert_equal 1, first.forks
+      assert_equal 1, second.forks
     end
 
     def test_ractor_fanout_failure_callbacks_are_contained

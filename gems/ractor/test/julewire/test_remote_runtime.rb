@@ -286,13 +286,17 @@ module Julewire
 
       refute_respond_to runtime, :emit_envelope
 
-      %i[after_fork! close config configure health labels].each do |method_name|
+      %i[after_fork! before_fork! close config configure health labels].each do |method_name|
         assert_raises(Julewire::Core::Error) { runtime.public_send(method_name) }
       end
     end
 
     def test_remote_runtime_rejects_after_fork
       assert_remote_runtime_rejects(:after_fork!, "Julewire.after_fork!")
+    end
+
+    def test_remote_runtime_rejects_before_fork
+      assert_remote_runtime_rejects(:before_fork!, "Julewire.before_fork!")
     end
 
     def test_remote_runtime_rejects_health

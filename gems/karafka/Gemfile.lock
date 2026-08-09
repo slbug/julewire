@@ -9,7 +9,7 @@ PATH
   remote: .
   specs:
     julewire-karafka (1.1.3)
-      julewire-core (>= 1.1.0)
+      julewire-core (>= 1.1.3)
       karafka (>= 2.5)
       waterdrop (>= 2.10)
       zeitwerk (>= 2.8.1)

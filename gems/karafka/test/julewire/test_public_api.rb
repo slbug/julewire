@@ -40,6 +40,7 @@ module Julewire
       assert_same monitor, Julewire::Karafka.install!(monitor: monitor)
 
       assert_includes monitor.subscriptions, "consumer.consumed"
+      assert_includes monitor.subscriptions, "swarm.manager.before_fork"
       assert_includes monitor.subscriptions, "swarm.node.after_fork"
     end
 
@@ -128,7 +129,7 @@ module Julewire
       assert_same monitor, Julewire::Karafka::ForkHooks.subscribe!(monitor, configuration: configuration)
       assert_same monitor, Julewire::Karafka::ForkHooks.subscribe!(monitor, configuration: configuration)
 
-      assert_equal %w[swarm.node.after_fork swarm.manager.after_fork], monitor.subscriptions
+      assert_equal %w[swarm.manager.before_fork swarm.node.after_fork swarm.manager.after_fork], monitor.subscriptions
     end
 
     def test_fork_hooks_retry_missing_events_from_partial_state
@@ -138,7 +139,7 @@ module Julewire
 
       Julewire::Karafka::ForkHooks.subscribe!(monitor, configuration: Julewire::Karafka::Configuration.new)
 
-      assert_equal %w[swarm.manager.after_fork], monitor.subscriptions
+      assert_equal %w[swarm.manager.before_fork swarm.manager.after_fork], monitor.subscriptions
     end
 
     def test_fork_hooks_record_subscribe_failure_metadata
@@ -148,7 +149,7 @@ module Julewire
 
       failure = Julewire.health.dig(:process_integrations, :karafka, :last_failure)
 
-      assert_equal %w[swarm.manager.after_fork], monitor.subscriptions
+      assert_equal %w[swarm.manager.before_fork swarm.manager.after_fork], monitor.subscriptions
       assert_equal :subscribe, failure.fetch(:action)
       assert_equal :fork_hooks, failure.fetch(:component)
       assert_equal "swarm.node.after_fork", failure.fetch(:event)
@@ -164,6 +165,16 @@ module Julewire
       assert_equal :after_fork, failure.fetch(:action)
       assert_equal :fork_hooks, failure.fetch(:component)
       assert_equal "swarm.node.after_fork", failure.fetch(:event)
+    end
+
+    def test_before_fork_failure_propagates_to_abort_the_karafka_fork
+      Julewire.stubs(:before_fork!).raises(Julewire::Core::UnsafeForkError, "unsafe fork")
+
+      error = assert_raises(Julewire::Core::UnsafeForkError) do
+        Julewire::Karafka::ForkHooks.handle("swarm.manager.before_fork", FakeEvent.new)
+      end
+
+      assert_equal "unsafe fork", error.message
     end
 
     def test_installers_handle_disabled_and_missing_monitors

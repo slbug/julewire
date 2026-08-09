@@ -5,6 +5,7 @@ require_relative "support/bridge_test_values"
 
 module Julewire
   class TestRactorDestination < Minitest::Test
+    cover "Julewire::Ractor::Destination#enqueue"
     cover "Julewire::Ractor::Destination#health"
     cover "Julewire::Ractor::Destination#handle_ack"
     cover "Julewire::Ractor::Destination#initialize"
@@ -632,19 +633,24 @@ module Julewire
   end
 
   class TestRactorDestinationForkLifecycle < Minitest::Test
+    cover "Julewire::Ractor::Destination#before_fork!"
     cover "Julewire::Ractor::Destination#after_fork!"
     cover "Julewire::Ractor::Destination#close_ports"
     cover "Julewire::Ractor::Destination#initialize_tracking"
     cover "Julewire::Ractor::Destination#spawn_worker"
     cover "Julewire::Ractor::Destination#start_worker"
     cover "Julewire::Ractor::Destination#wait_for_worker"
+    cover "Julewire::Ractor::Destination#flush_before_fork!"
+    cover "Julewire::Ractor::Destination#stop_before_fork!"
+    cover "Julewire::Ractor::Destination#validate_after_fork_process!"
+    cover "Julewire::Ractor::Destination#validate_before_fork_process!"
+    include DroppingRactorDestinationHelper
     include RactorRecordHelper
     include RactorWaitHelper
 
-    class ForkPipeBlockingFlushOutput
-      def initialize(io, release_io:)
+    class ForkPipeOutput
+      def initialize(io)
         @io = io
-        @release_io = release_io
       end
 
       def write(value) # rubocop:disable Naming/PredicateMethod -- Output protocol uses truthy write results.
@@ -654,108 +660,80 @@ module Julewire
       end
 
       def flush # rubocop:disable Naming/PredicateMethod -- Output protocol uses truthy flush results.
-        @io.puts(:flushing)
         @io.flush
-        @release_io.gets
         true
       end
     end
 
-    def test_ractor_destination_after_fork_waits_for_the_old_worker_to_close
-      entered_port = ::Ractor::Port.new
-      release_reader, release_writer = IO.pipe
-      completed = Queue.new
+    def test_ractor_destination_after_fork_is_idempotent_without_preparation
+      port = ::Ractor::Port.new
       destination = Julewire::Ractor::Destination.new(
-        output: BlockingCloseOutput.new(entered_port, release_reader),
-        close_output: true,
-        request_timeout: 1
+        output: RactorPortOutput.new(port),
+        request_timeout: 0.1
       )
       old_command_port = destination.instance_variable_get(:@port)
       old_worker = destination.instance_variable_get(:@worker)
-      thread = safe_thread { completed << destination.after_fork! }
+      old_ack_port = destination.instance_variable_get(:@ack_port)
+      old_ack_thread = destination.instance_variable_get(:@ack_thread)
 
-      assert_equal :closing, receive_ractor(entered_port)
-      wait_until { thread.status == "sleep" || !thread.alive? }
-
-      assert_equal "sleep", thread.status
-      assert_raises(ThreadError) { completed.pop(true) }
-
-      release_writer.puts(:release)
-      release_writer.flush
-
-      assert_same destination, safe_queue_pop(completed)
-      assert_same thread, thread.join(1)
+      assert_same destination, destination.after_fork!
+      assert_same old_command_port, destination.instance_variable_get(:@port)
+      assert_same old_worker, destination.instance_variable_get(:@worker)
+      assert_same old_ack_port, destination.instance_variable_get(:@ack_port)
+      assert_same old_ack_thread, destination.instance_variable_get(:@ack_thread)
     ensure
-      release_writer&.close unless release_writer&.closed?
-      cleanup_ractor_worker(old_command_port, old_worker) if defined?(old_worker)
-      cleanup_thread(thread, timeout: 1)
       cleanup_ractor_destination(destination)
-      Julewire::Ractor::PortLifecycle.close(entered_port) if entered_port
-      release_reader&.close unless release_reader&.closed?
+      Julewire::Ractor::PortLifecycle.close(port) if port
     end
 
     def test_ractor_destination_restarts_and_emits_in_a_forked_process
       require_process_fork!
 
       reader, writer = IO.pipe
-      release_reader, release_writer = IO.pipe
       status_reader, status_writer = IO.pipe
       destination = Julewire::Ractor::Destination.new(
-        output: ForkPipeBlockingFlushOutput.new(writer, release_io: release_reader),
-        request_timeout: 0.01
+        output: ForkPipeOutput.new(writer),
+        request_timeout: 1
       )
-      parent_port = destination.instance_variable_get(:@port)
-      destination.instance_variable_set(:@port, Object.new)
+      Julewire.configure { it.destinations.add(destination) }
+
+      assert_nil Julewire.before_fork!(timeout: 1)
+      assert_nil destination.instance_variable_get(:@port)
+      assert_nil destination.instance_variable_get(:@worker)
+
       child_pid = Process.fork do
         reader.close
-        release_writer.close
         status_reader.close
         exit_status = 1
         begin
-          destination.after_fork!
-          destination.emit(record(message: "fork-child"))
-          flushed = destination.flush(timeout: 0.01)
+          Julewire.after_fork!
+          Julewire.emit(message: "fork-child")
+          flushed = Julewire.flush(timeout: 1)
           status_writer.puts("flush_result:#{flushed}")
           status_writer.flush
-          exit_status = 0 unless flushed
+          exit_status = 0 if flushed
         ensure
           cleanup_ractor_destination(destination)
         end
         exit! exit_status
       end
-      destination.instance_variable_set(:@port, parent_port)
       writer.close
-      release_reader.close
       status_writer.close
 
       assert reader.wait_readable(2), "forked destination did not emit"
       emitted = JSON.parse(reader.gets)
 
-      assert reader.wait_readable(2), "forked destination did not start flushing"
-      flush_event = reader.gets.chomp
-
-      assert status_reader.wait_readable(2), "forked destination did not return from bounded flush"
+      assert status_reader.wait_readable(2), "forked destination did not flush"
       flush_result = status_reader.gets.chomp
-
-      release_writer.puts(:release)
-      release_writer.close
 
       _pid, status = Timeout.timeout(2) { Process.wait2(child_pid) }
       child_pid = nil
+      Julewire.after_fork!
 
       assert_equal "fork-child", emitted.fetch("message")
-      assert_equal "flushing", flush_event
-      assert_equal "flush_result:false", flush_result
+      assert_equal "flush_result:true", flush_result
       assert_predicate status, :success?
     ensure
-      unless release_writer&.closed?
-        begin
-          release_writer.puts(:release)
-          release_writer.close
-        rescue Errno::EPIPE, IOError
-          nil
-        end
-      end
       if child_pid
         begin
           Process.kill(:KILL, child_pid)
@@ -768,13 +746,47 @@ module Julewire
           nil
         end
       end
-      destination.instance_variable_set(:@port, parent_port) if destination && parent_port
       cleanup_ractor_destination(destination)
       reader&.close
       writer&.close unless writer&.closed?
-      release_reader&.close unless release_reader&.closed?
       status_reader&.close unless status_reader&.closed?
       status_writer&.close unless status_writer&.closed?
+    end
+
+    def test_ractor_destination_rejects_an_unprepared_inherited_restart
+      port = ::Ractor::Port.new
+      destination = Julewire::Ractor::Destination.new(output: RactorPortOutput.new(port))
+      old_process_id = destination.instance_variable_get(:@process_id)
+      worker = destination.instance_variable_get(:@worker)
+      destination.instance_variable_set(:@process_id, old_process_id - 1)
+
+      before_error = assert_raises(Julewire::Core::UnsafeForkError) { destination.before_fork! }
+      after_error = assert_raises(Julewire::Core::UnsafeForkError) { destination.after_fork! }
+
+      assert_match "without Julewire.before_fork!", before_error.message
+      assert_equal before_error.message, after_error.message
+      assert_same worker, destination.instance_variable_get(:@worker)
+    ensure
+      destination.instance_variable_set(:@process_id, old_process_id) if destination && old_process_id
+      cleanup_ractor_destination(destination)
+      Julewire::Ractor::PortLifecycle.close(port) if port
+    end
+
+    def test_ractor_destination_rejects_emits_while_quiesced
+      port, drops, destination = dropping_ractor_destination
+
+      assert_same destination, destination.before_fork!(timeout: 0.1)
+      assert_equal :flushed, receive_ractor(port)
+
+      destination.emit(record(message: "between-fork-hooks"))
+
+      assert_equal :closed_dropped, safe_queue_pop(drops)
+      assert_equal 1, destination.health.dig(:counts, :closed_dropped)
+
+      assert_same destination, destination.after_fork!
+    ensure
+      cleanup_ractor_destination(destination)
+      Julewire::Ractor::PortLifecycle.close(port) if port
     end
 
     private
@@ -785,39 +797,20 @@ module Julewire
 
     public
 
-    def test_ractor_destination_after_fork_uses_configured_old_worker_bound
-      entered_port = ::Ractor::Port.new
-      release_reader, release_writer = IO.pipe
-      failures = Queue.new
+    def test_ractor_destination_before_fork_uses_configured_flush_bound
+      port = ::Ractor::Port.new
       destination = Julewire::Ractor::Destination.new(
-        output: BlockingCloseOutput.new(entered_port, release_reader),
-        close_output: true,
-        request_timeout: 0.01,
-        on_failure: ->(error, metadata) { failures << [error, metadata] }
+        output: SlowFlushRactorPortOutput.new(port, sleep_seconds: 0.05),
+        request_timeout: 0.01
       )
-      old_command_port = destination.instance_variable_get(:@port)
-      old_worker = destination.instance_variable_get(:@worker)
 
-      assert_same(destination, bounded_ractor_operation { destination.after_fork! })
+      error = assert_raises(Julewire::Core::Error) { destination.before_fork! }
 
-      assert_equal :closing, receive_ractor(entered_port)
-      error, metadata = safe_queue_pop(failures, timeout: 0.1)
-
-      assert_instance_of Julewire::Core::Error, error
-      assert_equal "ractor destination worker did not stop within 0.01 seconds", error.message
-      assert_equal :after_fork, metadata.fetch(:phase)
-
-      release_writer.puts(:release)
-      release_writer.flush
-      bounded_ractor_operation { old_worker.value }
-
-      assert_same(destination, bounded_ractor_operation { destination.after_fork! })
+      assert_equal "ractor destination could not flush before fork", error.message
+      assert_equal :flushing, receive_ractor(port)
     ensure
-      release_writer&.close unless release_writer&.closed?
-      cleanup_ractor_worker(old_command_port, old_worker) if defined?(old_worker)
       cleanup_ractor_destination(destination)
-      Julewire::Ractor::PortLifecycle.close(entered_port) if entered_port
-      release_reader&.close unless release_reader&.closed?
+      Julewire::Ractor::PortLifecycle.close(port) if port
     end
   end
 
@@ -849,7 +842,7 @@ module Julewire
       release_reader&.close unless release_reader&.closed?
     end
 
-    def test_ractor_destination_restart_waits_for_a_worker_retained_after_timed_close
+    def test_ractor_destination_after_fork_does_not_replace_a_worker_retained_after_timed_close
       entered_port = ::Ractor::Port.new
       release_reader, release_writer = IO.pipe
       destination = Julewire::Ractor::Destination.new(
@@ -870,12 +863,40 @@ module Julewire
       release_writer.flush
 
       assert_same(destination, bounded_ractor_operation { destination.after_fork! })
-      assert_true destination.flush(timeout: 0.1)
+      assert_same command_port, destination.instance_variable_get(:@port)
+      assert_same worker, destination.instance_variable_get(:@worker)
+      assert_false destination.flush(timeout: 0.1)
+      assert_nil(bounded_ractor_operation { worker.value })
     ensure
       release_writer&.close unless release_writer&.closed?
       cleanup_ractor_destination(destination)
       Julewire::Ractor::PortLifecycle.close(entered_port) if entered_port
       release_reader&.close unless release_reader&.closed?
+    end
+
+    def test_ractor_destination_close_records_an_abnormally_stopped_worker
+      previous_report_on_exception = Thread.report_on_exception
+      Thread.report_on_exception = false
+      port = ::Ractor::Port.new
+      failures = Queue.new
+      destination = Julewire::Ractor::Destination.new(
+        output: RactorPortOutput.new(port),
+        request_timeout: 0.1,
+        on_failure: ->(error, metadata) { failures << [error, metadata] }
+      )
+      worker = destination.instance_variable_get(:@worker)
+      destination.instance_variable_get(:@port).send({ command: :unexpected })
+      assert_raises(::Ractor::RemoteError) { worker.value }
+
+      assert_false destination.close(timeout: 0.1)
+      observed = Array.new(2) { safe_queue_pop(failures, timeout: 0.1) }
+      worker_stop = observed.find { |_error, metadata| metadata.fetch(:phase) == :worker_stop }
+
+      assert_instance_of ::Ractor::RemoteError, worker_stop.fetch(0)
+    ensure
+      Thread.report_on_exception = previous_report_on_exception if defined?(previous_report_on_exception)
+      cleanup_ractor_destination(destination)
+      Julewire::Ractor::PortLifecycle.close(port) if port
     end
   end
 
@@ -911,6 +932,9 @@ module Julewire
 
       assert_equal 1, destination.health.dig(:counts, :received)
 
+      assert_same destination, destination.before_fork!(timeout: 0.1)
+      assert_equal :flushed, receive_ractor(port)
+
       restarted = safe_thread_value(safe_thread { destination.after_fork! }, timeout: 0.25)
 
       assert_same destination, restarted
@@ -935,7 +959,7 @@ module Julewire
       Julewire::Ractor::PortLifecycle.close(port) if port
     end
 
-    def test_ractor_destination_can_restart_after_close
+    def test_ractor_destination_after_fork_does_not_reopen_a_closed_destination
       port = ::Ractor::Port.new
       destination = Julewire::Ractor::Destination.new(output: RactorPortOutput.new(port))
 
@@ -945,14 +969,14 @@ module Julewire
 
       destination.emit(record(message: "after-restart"))
 
-      assert_true destination.flush(timeout: 0.1)
-      assert_equal "after-restart", JSON.parse(receive_ractor(port)).fetch("message")
+      assert_false destination.flush(timeout: 0.1)
+      assert_equal :closed, destination.health.fetch(:status)
     ensure
       cleanup_ractor_destination(destination)
       Julewire::Ractor::PortLifecycle.close(port) if port
     end
 
-    def test_ractor_destination_discards_inherited_handles_when_restart_fails
+    def test_ractor_destination_records_prepared_restart_failures
       port = ::Ractor::Port.new
       failures = Queue.new
       output = TestRactorDestination::MutableCopyabilityOutput.new(port)
@@ -963,9 +987,10 @@ module Julewire
       )
       old_command_port = destination.instance_variable_get(:@port)
       old_worker = destination.instance_variable_get(:@worker)
+
+      assert_same destination, destination.before_fork!(timeout: 0.1)
+
       output.make_non_copyable!
-      destination.instance_variable_set(:@process_id, Process.pid - 1)
-      destination.instance_variable_set(:@port, Object.new)
 
       restarted = safe_thread_value(safe_thread { destination.after_fork! }, timeout: 0.25)
 
@@ -982,35 +1007,6 @@ module Julewire
       assert_nil destination.instance_variable_get(:@ack_port)
       assert_nil destination.instance_variable_get(:@ack_thread)
     ensure
-      cleanup_ractor_worker(old_command_port, old_worker) if defined?(old_worker)
-      cleanup_ractor_destination(destination)
-      Julewire::Ractor::PortLifecycle.close(port) if port
-    end
-
-    def test_ractor_destination_records_worker_protocol_failures_during_restart
-      previous_report_on_exception = Thread.report_on_exception
-      Thread.report_on_exception = false
-      port = ::Ractor::Port.new
-      failures = Queue.new
-      destination = Julewire::Ractor::Destination.new(
-        output: RactorPortOutput.new(port),
-        request_timeout: 0.1,
-        on_failure: ->(error, metadata) { failures << [error, metadata] }
-      )
-      old_command_port = destination.instance_variable_get(:@port)
-      old_worker = destination.instance_variable_get(:@worker)
-      old_command_port.send({ command: :unexpected })
-      assert_raises(::Ractor::RemoteError) { old_worker.value }
-
-      assert_same(destination, bounded_ractor_operation { destination.after_fork! })
-      error, metadata = safe_queue_pop(failures, timeout: 0.1)
-
-      assert_instance_of ::Ractor::RemoteError, error
-      assert_equal :worker_stop, metadata.fetch(:phase)
-      assert_equal :ractor, metadata.fetch(:destination)
-      assert_empty nonblocking_queue_values(failures)
-    ensure
-      Thread.report_on_exception = previous_report_on_exception if defined?(previous_report_on_exception)
       cleanup_ractor_worker(old_command_port, old_worker) if defined?(old_worker)
       cleanup_ractor_destination(destination)
       Julewire::Ractor::PortLifecycle.close(port) if port

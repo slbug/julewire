@@ -2,7 +2,9 @@
 
 ## 1.1.3 - 2026-08-09
 
+- Quiesce Julewire resources on Karafka manager pre-fork events.
 - Test against Karafka 2.6 and remove reflective monitor-profile lookup.
+- Require julewire-core 1.1.3.
 - Refresh development tooling and compatibility locksets.
 
 ## 1.1.2 - 2026-08-02

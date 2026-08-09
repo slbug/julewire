@@ -69,6 +69,16 @@ module Julewire
           self
         end
 
+        def before_fork!(timeout: nil)
+          @destinations.before_fork!(timeout: timeout)
+          self
+        end
+
+        def cancel_before_fork!
+          @destinations.cancel_before_fork!
+          self
+        end
+
         def flush(timeout: nil)
           @destinations.flush(timeout: timeout)
         end

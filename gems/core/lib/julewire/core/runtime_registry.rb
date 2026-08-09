@@ -47,6 +47,20 @@ module Julewire
           runtimes.each(&:reset_after_fork_runtime!)
           Integration::ForkHooks.run
         end
+
+        def prepare_before_fork(primary:, timeout:)
+          Validation.validate_timeout!(timeout, name: :timeout)
+          runtimes = [primary] + @runtimes.get.values
+          deadline = Scheduling::Deadline.for(timeout)
+
+          runtimes.each do |runtime|
+            runtime.before_fork_runtime!(timeout: Scheduling::Deadline.remaining(deadline))
+          end
+          Integration::BeforeForkHooks.run
+        rescue StandardError
+          runtimes&.reverse_each(&:cancel_before_fork_runtime!)
+          raise
+        end
       end
     end
   end

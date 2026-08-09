@@ -49,8 +49,9 @@ module Julewire
       ].freeze
       DEFAULT_MAX_QUEUE = 1024
       DEFAULT_REQUEST_TIMEOUT = 1
+      WORKER_QUIESCE_MESSAGE = { command: :quiesce_worker }.freeze
       WORKER_STOP_MESSAGE = { command: :close_worker }.freeze
-      private_constant :COUNTER_KEYS, :QueueSlots, :WORKER_STOP_MESSAGE
+      private_constant :COUNTER_KEYS, :QueueSlots, :WORKER_QUIESCE_MESSAGE, :WORKER_STOP_MESSAGE
 
       attr_reader :name
 
@@ -84,22 +85,22 @@ module Julewire
         @request_timeout = request_timeout
         @on_drop = on_drop
         @on_failure = on_failure
+        @fork_lifecycle_mutex = Mutex.new
+        @prepared_for_fork = false
         initialize_tracking
         start_worker
       end
 
       def emit(record)
         increment(:received)
-        return drop(:closed_dropped, record) if closed?
-        return drop(:queue_full_dropped, record) unless @queue_slots.reserve
-
-        begin
-          degradation_marker = @health.degradation_marker
-          @port.send({ command: :emit, degradation_marker: degradation_marker, record: record })
-          increment(:queued)
-        rescue StandardError => e
-          release_slot
-          record_failure(e, phase: :ractor_send)
+        outcome, error = enqueue(record)
+        case outcome
+        when :closed
+          drop(:closed_dropped, record)
+        when :queue_full
+          drop(:queue_full_dropped, record)
+        when :send_error
+          record_failure(error, phase: :ractor_send)
           drop(:send_error, record)
         end
         nil
@@ -111,20 +112,43 @@ module Julewire
 
       def close(timeout: nil)
         timeout = lifecycle_timeout(timeout)
-        @closed.set(true)
+        @fork_lifecycle_mutex.synchronize { @closed.set(true) }
         result = request(:close, timeout: timeout, allow_closed: true)
         close_ports(timeout: timeout)
         result
       end
 
-      def after_fork!
-        if (@process_id - Process.pid).zero? && !close_ports(timeout: @request_timeout)
-          raise Core::Error, "ractor destination worker did not stop within #{@request_timeout} seconds"
-        end
+      def before_fork!(timeout: nil)
+        timeout = lifecycle_timeout(timeout)
+        @fork_lifecycle_mutex.synchronize do
+          validate_before_fork_process!
+          return self if @prepared_for_fork
 
-        initialize_tracking
-        start_worker
+          @closed.set(true)
+          deadline = Core::Scheduling::Deadline.for(timeout)
+          flush_before_fork!(Core::Scheduling::Deadline.remaining(deadline))
+          stop_before_fork!(Core::Scheduling::Deadline.remaining(deadline))
+          @prepared_for_fork = true
+        end
         self
+      rescue StandardError => e
+        record_failure(e, phase: :before_fork)
+        raise
+      end
+
+      def after_fork!
+        @fork_lifecycle_mutex.synchronize do
+          validate_after_fork_process!
+          return self unless @prepared_for_fork
+
+          initialize_tracking
+          start_worker
+          @prepared_for_fork = false
+        end
+        self
+      rescue Core::UnsafeForkError => e
+        record_failure(e, phase: :after_fork)
+        raise
       rescue StandardError => e
         record_failure(e, phase: :after_fork)
         self
@@ -152,6 +176,51 @@ module Julewire
       end
 
       private
+
+      def enqueue(record)
+        @fork_lifecycle_mutex.synchronize do
+          return [:closed, nil] if closed?
+          return [:queue_full, nil] unless @queue_slots.reserve
+
+          begin
+            @port.send(
+              { command: :emit, degradation_marker: @health.degradation_marker, record: record }
+            )
+            increment(:queued)
+            [:queued, nil]
+          rescue StandardError => e
+            release_slot
+            [:send_error, e]
+          end
+        end
+      end
+
+      def validate_before_fork_process!
+        return if @process_id == Process.pid
+
+        raise Core::UnsafeForkError,
+              "ractor destination was inherited without Julewire.before_fork! in the parent process"
+      end
+
+      def validate_after_fork_process!
+        return if @process_id == Process.pid || @prepared_for_fork
+
+        raise Core::UnsafeForkError,
+              "ractor destination was inherited without Julewire.before_fork! in the parent process"
+      end
+
+      def flush_before_fork!(timeout)
+        return if request(:flush, timeout: timeout, allow_closed: true)
+
+        @closed.set(false)
+        raise Core::Error, "ractor destination could not flush before fork"
+      end
+
+      def stop_before_fork!(timeout)
+        return if close_ports(timeout: timeout, stop_message: WORKER_QUIESCE_MESSAGE)
+
+        raise Core::Error, "ractor destination worker did not stop before fork within #{timeout} seconds"
+      end
 
       def validate_callable(callable, name:)
         Core::Validation.validate_callable!(callable, name: name)
@@ -269,12 +338,12 @@ module Julewire
 
       def closed? = @closed.get
 
-      def close_ports(timeout:)
+      def close_ports(timeout:, stop_message: WORKER_STOP_MESSAGE)
         worker_stopped = true
         begin
           if @worker
             begin
-              @port.send(WORKER_STOP_MESSAGE)
+              @port.send(stop_message)
             rescue ::Ractor::ClosedError
               # A stopped worker no longer accepts commands. Still collect it
               # below so an abnormal exit remains observable.

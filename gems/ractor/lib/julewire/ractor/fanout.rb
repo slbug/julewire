@@ -36,11 +36,30 @@ module Julewire
         @health.recover_if_successful do
           @destinations.each do |destination|
             destination.after_fork! if destination.respond_to?(:after_fork!)
+          rescue Core::UnsafeForkError
+            raise
           rescue StandardError => e
             record_failure(e, action: :after_fork, destination: destination.name)
           end
         end
         self
+      end
+
+      def before_fork!(timeout: nil)
+        Core::Validation.validate_timeout!(timeout, name: :timeout)
+        deadline = Core::Scheduling::Deadline.for(timeout)
+        prepared = []
+        @destinations.each do |destination|
+          next unless destination.respond_to?(:before_fork!)
+
+          prepared << destination
+          result = destination.before_fork!(timeout: Core::Scheduling::Deadline.remaining(deadline))
+          raise Core::Error, "destination #{destination.name} rejected before_fork" if result == false
+        end
+        self
+      rescue StandardError
+        prepared.reverse_each { it.after_fork! if it.respond_to?(:after_fork!) }
+        raise
       end
 
       def resource_identity = self

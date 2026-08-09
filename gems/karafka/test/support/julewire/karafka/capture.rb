@@ -63,7 +63,11 @@ module JulewireCapture
   end
 
   def profile_subscriptions(monitor)
-    Array(monitor.subscriptions) - %w[swarm.node.after_fork swarm.manager.after_fork]
+    Array(monitor.subscriptions) - %w[
+      swarm.manager.before_fork
+      swarm.node.after_fork
+      swarm.manager.after_fork
+    ]
   end
 
   def captured_severity(listener, event, payload)

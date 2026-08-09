@@ -151,6 +151,11 @@ attempts later destinations after a previous lifecycle call returns.
 out, `Julewire.close` returns `false`, but later emits still drop as
 `runtime_closed` until the next `configure` or `reset!`.
 
+`Julewire.before_fork!` gives destinations a bounded opportunity to drain and
+quiesce resources that cannot safely survive `Process.fork`. Preparation
+failures propagate so the process manager can abort the fork. Stop application
+work that can emit or create process-local workers before calling it.
+
 `Julewire.after_fork!` resets process-local counters, failure snapshots,
 current context, warning state, schedulers, and registries that cannot be
 shared with the child process. It also forwards `after_fork!` to destinations
@@ -158,6 +163,16 @@ and outputs that implement it, then runs integration after-fork hooks
 registered through core. File, socket, queue, and async transports should
 reopen worker-local resources from their destination or output `after_fork!`
 method.
+
+Forking servers must pair the lifecycle calls around the actual fork:
+
+```ruby
+before_fork { Julewire.before_fork! }
+on_worker_boot { Julewire.after_fork! }
+```
+
+The parent may also call `Julewire.after_fork!` when it must resume destinations
+between worker forks.
 
 Core does not install an `at_exit` hook. Small scripts should call close from
 their own shutdown path:

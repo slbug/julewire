@@ -5,13 +5,24 @@ require "stringio"
 
 module Julewire
   class TestCoreRuntimeHooks < Minitest::Test
+    cover Julewire::Core::Integration::BeforeForkHooks
     cover Julewire::Core::Integration::ForkHooks
+    cover Julewire::Core::Integration::HookNames
+    cover "Julewire::Core::Integration::Lifecycle.register_before_fork"
     cover "Julewire::Core::Integration::Lifecycle.register_after_fork"
+    cover "Julewire::Core::Runtime#before_fork!"
+    cover "Julewire::Core::Runtime#before_fork_runtime!"
+    cover "Julewire::Core::Runtime#cancel_before_fork_runtime!"
     cover "Julewire::Core::Runtime#after_fork!"
     cover "Julewire::Core::Runtime#with_emit_guard"
     cover "Julewire::Core::Runtime#reset_after_fork_runtime!"
     cover "Julewire::Core::Runtime#reset_after_fork_state!"
     cover "Julewire::Core::RuntimeRegistry.reset_after_fork"
+    cover "Julewire::Core::RuntimeRegistry.prepare_before_fork"
+    cover "Julewire::Core::Destinations::Destination#before_fork!"
+    cover "Julewire::Core::Destinations::SynchronizedOutput#before_fork!"
+    cover "Julewire::Core::Processing::Pipeline#before_fork!"
+    cover "Julewire::Core::Processing::Pipeline#cancel_before_fork!"
     class FailingOutput
       def write(_value)
         raise "write failed"
@@ -19,10 +30,11 @@ module Julewire
     end
 
     class ForkAwareOutput
-      attr_reader :after_fork_count
+      attr_reader :after_fork_count, :before_fork_timeouts
 
       def initialize
         @after_fork_count = 0
+        @before_fork_timeouts = []
       end
 
       def write(value)
@@ -31,6 +43,10 @@ module Julewire
 
       def after_fork!
         @after_fork_count += 1
+      end
+
+      def before_fork!(timeout:)
+        @before_fork_timeouts << timeout
       end
     end
 
@@ -46,6 +62,59 @@ module Julewire
 
     def test_configure_rejects_after_fork_from_inside_configure
       assert_runtime_call_rejected_inside_configure(:after_fork!) { Julewire.after_fork! }
+    end
+
+    def test_configure_rejects_before_fork_from_inside_configure
+      assert_runtime_call_rejected_inside_configure(:before_fork!) { Julewire.before_fork! }
+    end
+
+    def test_before_fork_prepares_default_and_named_runtime_outputs_once
+      default_output = ForkAwareOutput.new
+      audit_output = ForkAwareOutput.new
+      Julewire.configure { configure_destination(it, output: default_output) }
+      Julewire.runtime(:audit).configure { configure_destination(it, output: audit_output) }
+
+      assert_nil Julewire.before_fork!(timeout: 1)
+      assert_nil Julewire.before_fork!(timeout: 1)
+
+      assert_equal 1, default_output.before_fork_timeouts.length
+      assert_equal 1, audit_output.before_fork_timeouts.length
+      assert_operator default_output.before_fork_timeouts.fetch(0), :<=, 1
+      assert_operator audit_output.before_fork_timeouts.fetch(0), :<=, 1
+
+      Julewire.after_fork!
+
+      assert_equal 1, default_output.after_fork_count
+      assert_equal 1, audit_output.after_fork_count
+    end
+
+    def test_before_fork_hook_failure_aborts_and_resumes_prepared_destinations
+      output = ForkAwareOutput.new
+      active = true
+      Julewire.configure { configure_destination(it, output: output) }
+      Julewire::Core::Integration::Lifecycle.register_before_fork(:test_core, component: :failure) do
+        raise "unsafe fork" if active
+      end
+
+      error = assert_raises(RuntimeError) { Julewire.before_fork! }
+
+      assert_equal "unsafe fork", error.message
+      assert_equal [nil], output.before_fork_timeouts
+      assert_equal 1, output.after_fork_count
+    ensure
+      active = false
+    end
+
+    def test_before_fork_registration_requires_symbol_protocol_names
+      integration_error = assert_raises(TypeError) do
+        Julewire::Core::Integration::Lifecycle.register_before_fork("test_core", component: :fork) { nil }
+      end
+      component_error = assert_raises(TypeError) do
+        Julewire::Core::Integration::Lifecycle.register_before_fork(:test_core, component: "fork") { nil }
+      end
+
+      assert_equal "integration must be a Symbol", integration_error.message
+      assert_equal "component must be a Symbol", component_error.message
     end
 
     def test_after_fork_resets_process_local_warning_state

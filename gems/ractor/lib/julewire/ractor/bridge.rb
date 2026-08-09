@@ -48,6 +48,20 @@ module Julewire
 
         def after_fork! = Stats.after_fork!
 
+        def before_fork!
+          active_bridges = Stats.health.fetch(:active_threads)
+          if active_bridges.positive?
+            raise Core::UnsafeForkError,
+                  "cannot fork while #{active_bridges} Julewire ractor bridge thread(s) are active"
+          end
+
+          active_ractors = ::Ractor.count
+          return if active_ractors == 1
+
+          raise Core::UnsafeForkError,
+                "cannot fork while #{active_ractors - 1} non-main Ractor(s) are active"
+        end
+
         private
 
         def start_bridge(port:, runtime:, ractor: nil)

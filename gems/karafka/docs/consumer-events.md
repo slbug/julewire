@@ -6,7 +6,9 @@ events, or pass an explicit event list for application policy. If the monitor
 cannot expose its registered events, `:all` uses the important profile.
 
 `install!` also subscribes lightweight handlers for
-`swarm.node.after_fork` and `swarm.manager.after_fork`. Those handlers call
+`swarm.manager.before_fork`, `swarm.node.after_fork`, and
+`swarm.manager.after_fork`. The manager hook calls `Julewire.before_fork!` so
+unsafe resources drain before process creation. The after-fork handlers call
 `Julewire.after_fork!` so inherited mutexes, counters, async transports, and
 process-local context are reset in Karafka forked processes.
 

@@ -22,6 +22,7 @@ matcher:
   subjects:
   - Julewire.after_fork!
   - Julewire.attributes
+  - Julewire.before_fork!
   - Julewire.carry
   - Julewire.close
   - Julewire.config
@@ -69,3 +70,4 @@ matcher:
   - Julewire::TailSampling*
   - Julewire::Testing*
   - Julewire::TextEncoder*
+  - Julewire::UnsafeForkError*
