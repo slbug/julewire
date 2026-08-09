@@ -20,7 +20,8 @@ module Julewire
         raise "reader failed"
       end
 
-      def respond_to?(_method_name, _include_private = false) = true # rubocop:disable Style/OptionalBooleanParameter -- Ruby API shape.
+      # Match Ruby's respond_to? signature.
+      def respond_to?(_method_name, _include_private = false) = true # rubocop:disable Style/OptionalBooleanParameter
     end
 
     class RaisingPayload

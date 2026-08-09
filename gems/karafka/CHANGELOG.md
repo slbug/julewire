@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.1.3 - 2026-08-09
+
+- Test against Karafka 2.6 and remove reflective monitor-profile lookup.
+- Refresh development tooling and compatibility locksets.
+
 ## 1.1.2 - 2026-08-02
 
 - Refresh development and compatibility dependency locksets.

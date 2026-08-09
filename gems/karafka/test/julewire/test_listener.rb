@@ -7,6 +7,7 @@ module Julewire
     cover "Julewire::Karafka::EventSeverity.error_severity"
     cover "Julewire::Karafka::Installer.install!"
     cover Julewire::Karafka::MonitorListener
+    cover "Julewire::Karafka::MonitorProfiles*"
     cover "Julewire::Karafka::MonitorSubscription*"
     cover "Julewire::Karafka::MonitorListener#messaging_attributes"
     cover "Julewire::Karafka::MonitorListener.producer"
@@ -80,8 +81,8 @@ module Julewire
       require "karafka/instrumentation/notifications"
 
       events = Julewire::Karafka::Configuration::IMPORTANT_CONSUMER_EVENT_NAMES +
-               Julewire::Karafka::EventSeverity.const_get(:DEBUG_CONSUMER_EVENTS, false) +
-               Julewire::Karafka::EventSeverity.const_get(:ERROR_CONSUMER_EVENTS, false) +
+               Julewire::Karafka::EventSeverity::DEBUG_CONSUMER_EVENTS +
+               Julewire::Karafka::EventSeverity::ERROR_CONSUMER_EVENTS +
                Julewire::Karafka::EventPayload.const_get(:CONSUMER_BATCH_EVENTS, false) +
                Julewire::Karafka::ForkHooks.const_get(:EVENTS, false) +
                %w[

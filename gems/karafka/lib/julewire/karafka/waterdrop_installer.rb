@@ -41,7 +41,7 @@ module Julewire
           return unless producer.respond_to?(:monitor)
 
           monitor = producer.monitor
-          MonitorSubscription.install!(monitor, configuration: configuration, profile: :producer)
+          MonitorSubscription.install!(monitor, configuration: configuration, profile: MonitorProfiles.producer)
         rescue StandardError => e
           IntegrationHealth.record_failure(e, action: :install, component: :waterdrop_installer)
         end

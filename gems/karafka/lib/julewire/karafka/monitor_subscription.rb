@@ -3,12 +3,6 @@
 module Julewire
   module Karafka
     module MonitorSubscription
-      PROFILE_CONSTANTS = {
-        consumer: :CONSUMER_PROFILE,
-        producer: :PRODUCER_PROFILE
-      }.freeze
-      private_constant :PROFILE_CONSTANTS
-
       class << self
         def subscribe(monitor, event_name, component:, &)
           return false unless monitor.respond_to?(:subscribe)
@@ -20,7 +14,6 @@ module Julewire
         end
 
         def install!(monitor, profile:, configuration:)
-          profile = monitor_listener_profile(profile)
           state = subscription_state(monitor, profile)
           listener = listener_for(state, configuration, profile)
           subscriptions = subscriptions_for(state)
@@ -40,11 +33,6 @@ module Julewire
         end
 
         private
-
-        def monitor_listener_profile(profile)
-          constant_name = PROFILE_CONSTANTS.fetch(profile)
-          MonitorListener.const_get(constant_name)
-        end
 
         def listener_for(state, configuration, profile)
           listener = state&.fetch(:listener)
