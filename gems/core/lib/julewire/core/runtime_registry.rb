@@ -53,13 +53,15 @@ module Julewire
           runtimes = [primary] + @runtimes.get.values
           deadline = Scheduling::Deadline.for(timeout)
 
-          runtimes.each do |runtime|
-            runtime.before_fork_runtime!(timeout: Scheduling::Deadline.remaining(deadline))
+          begin
+            runtimes.each do |runtime|
+              runtime.before_fork_runtime!(timeout: Scheduling::Deadline.remaining(deadline))
+            end
+            Integration::BeforeForkHooks.run
+          rescue StandardError
+            runtimes.reverse_each(&:cancel_before_fork_runtime!)
+            raise
           end
-          Integration::BeforeForkHooks.run
-        rescue StandardError
-          runtimes&.reverse_each(&:cancel_before_fork_runtime!)
-          raise
         end
       end
     end

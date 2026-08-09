@@ -10,6 +10,7 @@ module Julewire
     cover Julewire::Core::Integration::HookNames
     cover "Julewire::Core::Integration::Lifecycle.register_before_fork"
     cover "Julewire::Core::Integration::Lifecycle.register_after_fork"
+    cover "Julewire::Core::FacadeMethods#before_fork!"
     cover "Julewire::Core::Runtime#before_fork!"
     cover "Julewire::Core::Runtime#before_fork_runtime!"
     cover "Julewire::Core::Runtime#cancel_before_fork_runtime!"
@@ -19,8 +20,6 @@ module Julewire
     cover "Julewire::Core::Runtime#reset_after_fork_state!"
     cover "Julewire::Core::RuntimeRegistry.reset_after_fork"
     cover "Julewire::Core::RuntimeRegistry.prepare_before_fork"
-    cover "Julewire::Core::Destinations::Destination#before_fork!"
-    cover "Julewire::Core::Destinations::SynchronizedOutput#before_fork!"
     cover "Julewire::Core::Processing::Pipeline#before_fork!"
     cover "Julewire::Core::Processing::Pipeline#cancel_before_fork!"
     class FailingOutput
@@ -60,6 +59,19 @@ module Julewire
       end
     end
 
+    class OrderedForkOutput < ForkAwareOutput
+      def initialize(name:, order:)
+        super()
+        @name = name
+        @order = order
+      end
+
+      def after_fork!
+        @order << @name
+        super
+      end
+    end
+
     def test_configure_rejects_after_fork_from_inside_configure
       assert_runtime_call_rejected_inside_configure(:after_fork!) { Julewire.after_fork! }
     end
@@ -79,6 +91,8 @@ module Julewire
 
       assert_equal 1, default_output.before_fork_timeouts.length
       assert_equal 1, audit_output.before_fork_timeouts.length
+      assert_operator default_output.before_fork_timeouts.fetch(0), :>, 0
+      assert_operator audit_output.before_fork_timeouts.fetch(0), :>, 0
       assert_operator default_output.before_fork_timeouts.fetch(0), :<=, 1
       assert_operator audit_output.before_fork_timeouts.fetch(0), :<=, 1
 
@@ -105,16 +119,71 @@ module Julewire
       active = false
     end
 
+    def test_runtime_before_fork_accepts_default_timeout
+      output = ForkAwareOutput.new
+      Julewire.configure { configure_destination(it, output: output) }
+
+      assert_nil Julewire.runtime.before_fork!
+      assert_equal [nil], output.before_fork_timeouts
+    ensure
+      Julewire.after_fork!
+    end
+
     def test_before_fork_registration_requires_symbol_protocol_names
-      integration_error = assert_raises(TypeError) do
-        Julewire::Core::Integration::Lifecycle.register_before_fork("test_core", component: :fork) { nil }
-      end
-      component_error = assert_raises(TypeError) do
-        Julewire::Core::Integration::Lifecycle.register_before_fork(:test_core, component: "fork") { nil }
+      assert_fork_registration_requires_symbol_names(:register_before_fork, component: :fork)
+    end
+
+    def test_before_fork_rejects_invalid_timeout_before_preparing_outputs
+      output = ForkAwareOutput.new
+      Julewire.configure { configure_destination(it, output: output) }
+
+      error = assert_raises(ArgumentError) { Julewire.before_fork!(timeout: -1) }
+
+      assert_equal "timeout must be nil or a non-negative finite Numeric", error.message
+      assert_empty output.before_fork_timeouts
+    end
+
+    def test_before_fork_keeps_multiple_components_for_one_integration
+      assert_before_fork_hooks(
+        [%i[test_core first first], %i[test_core second second]]
+      )
+    end
+
+    def test_before_fork_keeps_same_component_for_multiple_integrations
+      assert_before_fork_hooks(
+        [%i[first hook first], %i[second hook second]]
+      )
+    end
+
+    def test_before_fork_registration_rejects_programmer_errors
+      assert_raises_message(ArgumentError, "block required") do
+        Julewire::Core::Integration::Lifecycle.register_before_fork(:test_core, component: :before_fork)
       end
 
-      assert_equal "integration must be a Symbol", integration_error.message
-      assert_equal "component must be a Symbol", component_error.message
+      assert_raises_message(ArgumentError, "integration is required") do
+        Julewire::Core::Integration::Lifecycle.register_before_fork(:"", component: :before_fork) { nil }
+      end
+    end
+
+    def test_before_fork_failure_resumes_named_runtimes_in_reverse_order
+      order = []
+      active = true
+      Julewire.configure do |config|
+        configure_destination(config, output: OrderedForkOutput.new(name: :default, order: order))
+      end
+      Julewire.runtime(:audit).configure do |config|
+        configure_destination(config, output: OrderedForkOutput.new(name: :audit, order: order))
+      end
+      Julewire::Core::Integration::Lifecycle.register_before_fork(:test_core, component: :ordered_failure) do
+        raise "unsafe fork" if active
+      end
+
+      error = assert_raises(RuntimeError) { Julewire.before_fork! }
+
+      assert_equal "unsafe fork", error.message
+      assert_equal %i[audit default], order
+    ensure
+      active = false
     end
 
     def test_after_fork_resets_process_local_warning_state
@@ -331,15 +400,7 @@ module Julewire
     end
 
     def test_after_fork_registration_rejects_string_protocol_names
-      integration_error = assert_raises(TypeError) do
-        Julewire::Core::Integration::Lifecycle.register_after_fork("test_core", component: :after_fork) { nil }
-      end
-      component_error = assert_raises(TypeError) do
-        Julewire::Core::Integration::Lifecycle.register_after_fork(:test_core, component: "after_fork") { nil }
-      end
-
-      assert_equal "integration must be a Symbol", integration_error.message
-      assert_equal "component must be a Symbol", component_error.message
+      assert_fork_registration_requires_symbol_names(:register_after_fork, component: :after_fork)
     end
 
     def test_after_fork_runs_every_concurrently_registered_hook
@@ -438,6 +499,35 @@ module Julewire
     # rubocop:enable Minitest/SkipEnsure
 
     private
+
+    def assert_fork_registration_requires_symbol_names(method_name, component:)
+      integration_error = assert_raises(TypeError) do
+        Julewire::Core::Integration::Lifecycle.public_send(method_name, "test_core", component:) { nil }
+      end
+      component_error = assert_raises(TypeError) do
+        Julewire::Core::Integration::Lifecycle.public_send(method_name, :test_core, component: component.to_s) { nil }
+      end
+
+      assert_equal "integration must be a Symbol", integration_error.message
+      assert_equal "component must be a Symbol", component_error.message
+    end
+
+    def assert_before_fork_hooks(registrations)
+      calls = []
+      active = true
+      registrations.each do |integration, component, value|
+        Julewire::Core::Integration::Lifecycle.register_before_fork(integration, component:) do
+          calls << value if active
+        end
+      end
+
+      Julewire.before_fork!
+
+      assert_equal registrations.map(&:last), calls
+    ensure
+      active = false
+      Julewire.after_fork!
+    end
 
     def assert_after_fork_hooks(registrations)
       calls = []

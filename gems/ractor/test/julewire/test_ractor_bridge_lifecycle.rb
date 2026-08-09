@@ -779,7 +779,7 @@ module Julewire
         Julewire::Ractor::Bridge.before_fork!
       end
 
-      assert_match "Julewire ractor bridge", error.message
+      assert_equal "cannot fork while 1 Julewire ractor bridge thread(s) are active", error.message
     ensure
       stats&.bridge_stopped
     end
@@ -791,7 +791,7 @@ module Julewire
         Julewire::Ractor::Bridge.before_fork!
       end
 
-      assert_match "non-main Ractor", error.message
+      assert_equal "cannot fork while non-main Ractors are active", error.message
     ensure
       ractor&.value
     end

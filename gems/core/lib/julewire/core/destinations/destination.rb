@@ -85,7 +85,7 @@ module Julewire
         end
 
         def before_fork!(timeout: nil)
-          @output.before_fork!(timeout: timeout) if @output.respond_to?(:before_fork!)
+          @output.before_fork!(timeout: timeout)
           self
         end
 

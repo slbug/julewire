@@ -46,7 +46,6 @@ module Julewire
     cover "Julewire::Core::Runtime#runtime_state"
     cover "Julewire::Core::Runtime#summary"
     cover "Julewire::Core::FacadeMethods#after_fork!"
-    cover "Julewire::Core::FacadeMethods#before_fork!"
     cover "Julewire::Core::FacadeMethods#attributes"
     cover "Julewire::Core::FacadeMethods#carry"
     cover "Julewire::Core::FacadeMethods#close"

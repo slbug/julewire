@@ -51,9 +51,15 @@ module Julewire
     end
 
     class BeforeForkDestination < ForkingDestination
-      attr_reader :before_fork_timeout
+      attr_reader :before_fork_count, :before_fork_timeout
+
+      def initialize
+        super
+        @before_fork_count = 0
+      end
 
       def before_fork!(timeout: nil)
+        @before_fork_count += 1
         @before_fork_timeout = timeout
         self
       end
@@ -733,8 +739,44 @@ module Julewire
       assert_same sampler, sampler.before_fork!(timeout: 0.25)
 
       assert_equal 1, destination.records.length
+      assert_equal 1, destination.before_fork_count
+      assert_operator sampler.health.dig(:destination, :flushed), :>, 0
+      assert_operator sampler.health.dig(:destination, :flushed), :<=, 0.25
+      assert_operator destination.before_fork_timeout, :>, 0
       assert_operator destination.before_fork_timeout, :<=, 0.25
+      assert_operator destination.before_fork_timeout, :<=, sampler.health.dig(:destination, :flushed)
       assert_equal 0, sampler.health.fetch(:buffered_executions)
+    end
+
+    def test_tail_sampling_before_fork_accepts_default_timeout
+      destination = BeforeForkDestination.new
+      sampler = Julewire::TailSampling.new(destination: destination, sample_rate: 1)
+
+      assert_same sampler, sampler.before_fork!
+      assert_equal 1, destination.before_fork_count
+      assert_nil destination.before_fork_timeout
+    end
+
+    def test_tail_sampling_before_fork_skips_destination_without_hook_and_keeps_buffer
+      destination = CapturingDestination.new
+      sampler = Julewire::TailSampling.new(destination: destination, sample_rate: 1)
+      sampler.emit(build_record({ message: "pending", execution: { type: :job, id: "job-1" } }))
+
+      assert_same sampler, sampler.before_fork!(timeout: 0.25)
+      assert_equal 1, sampler.health.fetch(:buffered_executions)
+      assert_empty destination.records
+      assert_false sampler.health.dig(:destination, :flushed)
+    end
+
+    def test_tail_sampling_before_fork_rejects_invalid_timeout_before_flushing
+      destination = BeforeForkDestination.new
+      sampler = Julewire::TailSampling.new(destination: destination, sample_rate: 1)
+
+      error = assert_raises(ArgumentError) { sampler.before_fork!(timeout: -1) }
+
+      assert_equal "timeout must be nil or a non-negative finite Numeric", error.message
+      assert_equal 0, destination.before_fork_count
+      assert_false sampler.health.dig(:destination, :flushed)
     end
 
     def test_tail_sampling_after_fork_contains_destination_failures

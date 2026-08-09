@@ -9,8 +9,7 @@ module Julewire
           @destinations = destinations.dup.freeze
           @on_drop = on_drop
           @on_failure = on_failure
-          @prepared_destinations = [].freeze
-          @fork_lifecycle_mutex = Mutex.new
+          @prepared_destinations = []
         end
 
         class << self
@@ -40,30 +39,24 @@ module Julewire
         end
 
         def after_fork!
-          @fork_lifecycle_mutex.synchronize do
-            @destinations.each do |destination|
-              call_destination_after_fork(destination)
-            end
-            @prepared_destinations = [].freeze
+          @destinations.each do |destination|
+            call_destination_after_fork(destination)
           end
+          @prepared_destinations = []
           self
         end
 
-        def before_fork!(timeout: nil)
+        def before_fork!(timeout:)
           Validation.validate_timeout!(timeout, name: :timeout)
-          @fork_lifecycle_mutex.synchronize do
-            return self unless @prepared_destinations.empty?
+          return self unless @prepared_destinations.empty?
 
-            prepare_destinations_before_fork(timeout)
-          end
+          prepare_destinations_before_fork(timeout)
           self
         end
 
         def cancel_before_fork!
-          @fork_lifecycle_mutex.synchronize do
-            @prepared_destinations.reverse_each { call_destination_after_fork(it) }
-            @prepared_destinations = [].freeze
-          end
+          @prepared_destinations.reverse_each { call_destination_after_fork(it) }
+          @prepared_destinations = []
           self
         end
 
@@ -98,7 +91,7 @@ module Julewire
             result = destination.before_fork!(timeout: remaining)
             raise Error, "destination #{destination_name(destination)} rejected before_fork" if result == false
           end
-          @prepared_destinations = prepared.freeze
+          @prepared_destinations = prepared
         rescue StandardError
           prepared.reverse_each { call_destination_after_fork(it) }
           raise

@@ -34,21 +34,15 @@ module Julewire
 
       def after_fork!
         @health.recover_if_successful do
-          @destinations.each do |destination|
-            destination.after_fork! if destination.respond_to?(:after_fork!)
-          rescue Core::UnsafeForkError
-            raise
-          rescue StandardError => e
-            record_failure(e, action: :after_fork, destination: destination.name)
-          end
+          @destinations.each { call_destination_after_fork(it) }
         end
         self
       end
 
       def before_fork!(timeout: nil)
+        prepared = []
         Core::Validation.validate_timeout!(timeout, name: :timeout)
         deadline = Core::Scheduling::Deadline.for(timeout)
-        prepared = []
         @destinations.each do |destination|
           next unless destination.respond_to?(:before_fork!)
 
@@ -58,7 +52,7 @@ module Julewire
         end
         self
       rescue StandardError
-        prepared.reverse_each { it.after_fork! if it.respond_to?(:after_fork!) }
+        prepared.reverse_each { call_destination_after_fork(it) }
         raise
       end
 
@@ -73,6 +67,14 @@ module Julewire
       end
 
       private
+
+      def call_destination_after_fork(destination)
+        destination.after_fork! if destination.respond_to?(:after_fork!)
+      rescue Core::UnsafeForkError
+        raise
+      rescue StandardError => e
+        record_failure(e, action: :after_fork, destination: destination.name)
+      end
 
       def normalize_destination(value)
         destination = value.is_a?(Hash) ? Destination.new(**value) : value
