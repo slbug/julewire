@@ -10,6 +10,10 @@ module Julewire
       stats.after_fork!
     end
 
+    def teardown
+      stats.after_fork!
+    end
+
     def test_bridge_started_and_stopped_track_thread_counts
       stats.bridge_started
       stats.bridge_started
