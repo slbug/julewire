@@ -28,6 +28,21 @@ module Julewire
       end
     end
 
+    class RecoveringCloseOutput < RactorPortOutput
+      def initialize(port)
+        super
+        @close_result = false
+      end
+
+      def accept_close! = @close_result = true
+
+      def close
+        @port.send(@close_result ? :closed : :close_rejected)
+        @closed = true if @close_result
+        @close_result
+      end
+    end
+
     def test_ractor_destination_reports_worker_drops
       write_port = ::Ractor::Port.new
       destination = Julewire::Ractor::Destination.new(
@@ -836,8 +851,39 @@ module Julewire
       assert_equal :closed, destination.health.fetch(:status)
       assert_nil destination.instance_variable_get(:@worker)
       assert_same destination, destination.after_fork!
+
+      output.make_copyable!
+
+      assert_true destination.close(timeout: 0.1)
+      assert_equal :closed, receive_ractor(port)
+      assert_true destination.close(timeout: 0.1)
+      assert_raises(Timeout::Error) { Timeout.timeout(0.02) { ::Ractor.select(port) } }
     ensure
       output&.make_copyable!
+      cleanup_ractor_destination(destination)
+      Julewire::Ractor::PortLifecycle.close(port) if port
+    end
+
+    def test_closing_a_prepared_ractor_destination_retries_rejected_owned_output_cleanup
+      port = ::Ractor::Port.new
+      output = TestRactorDestination::RecoveringCloseOutput.new(port)
+      destination = Julewire::Ractor::Destination.new(
+        output: output,
+        close_output: true,
+        request_timeout: 0.1
+      )
+
+      assert_same destination, destination.before_fork!(timeout: 0.1)
+      assert_equal :flushed, receive_ractor(port)
+      assert_false destination.close(timeout: 0.1)
+      assert_equal :close_rejected, receive_ractor(port)
+      assert_equal :close_rejected, receive_ractor(port)
+
+      output.accept_close!
+
+      assert_true destination.close(timeout: 0.1)
+      assert_equal :closed, receive_ractor(port)
+    ensure
       cleanup_ractor_destination(destination)
       Julewire::Ractor::PortLifecycle.close(port) if port
     end

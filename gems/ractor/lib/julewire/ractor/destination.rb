@@ -114,7 +114,8 @@ module Julewire
           prepared_for_fork = @prepared_for_fork
           @prepared_for_fork = false
           unless @worker
-            return true unless prepared_for_fork && @close_output
+            @owned_output_close_pending ||= prepared_for_fork && @close_output
+            return true unless @owned_output_close_pending
 
             begin
               start_worker
@@ -127,6 +128,7 @@ module Julewire
           result = request(:close, timeout: timeout, allow_closed: true)
           begin
             close_ports(timeout: timeout)
+            @owned_output_close_pending = false if result
             result
           rescue Core::Error => e
             record_failure(e, phase: :worker_stop)
