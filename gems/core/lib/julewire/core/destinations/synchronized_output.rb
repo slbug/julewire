@@ -23,11 +23,13 @@ module Julewire
         end
 
         def before_fork!(timeout: nil)
-          @lifecycle_mutex.synchronize do
+          result = @lifecycle_mutex.synchronize do
             @mutex.synchronize do
               @output.before_fork!(timeout: timeout) if @output.respond_to?(:before_fork!)
             end
           end
+          return false if result == false
+
           self
         end
 

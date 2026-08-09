@@ -138,6 +138,13 @@ module Julewire
     end
   end
 
+  class RejectingForkOutput < ForkAwareOutput
+    def before_fork!(timeout: nil) # rubocop:disable Naming/PredicateMethod -- Fork protocol uses false for rejection.
+      super
+      false
+    end
+  end
+
   class LifecycleProbeOutput < ForkAwareOutput
     attr_reader :close_count, :flush_count, :values
 
@@ -309,6 +316,17 @@ module Julewire
       outputs.each do |output|
         assert_equal 1, output.before_fork_count
         assert_nil output.before_fork_timeout
+      end
+    end
+
+    def test_output_wrappers_preserve_explicit_before_fork_rejection
+      outputs = Array.new(3) { RejectingForkOutput.new }
+      wrappers = lifecycle_wrappers(outputs)
+
+      wrappers.each { assert_false it.before_fork!(timeout: 0.25) }
+      outputs.each do |output|
+        assert_equal 1, output.before_fork_count
+        assert_in_delta 0.25, output.before_fork_timeout
       end
     end
 

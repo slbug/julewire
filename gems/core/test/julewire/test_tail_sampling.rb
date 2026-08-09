@@ -65,6 +65,13 @@ module Julewire
       end
     end
 
+    class RejectingPreparationDestination < BeforeForkDestination
+      def before_fork!(timeout: nil) # rubocop:disable Naming/PredicateMethod -- Fork protocol uses false for rejection.
+        super
+        false
+      end
+    end
+
     class RaisingAfterForkDestination < CapturingDestination
       def after_fork!
         raise "after fork failed"
@@ -755,6 +762,16 @@ module Julewire
       assert_same sampler, sampler.before_fork!
       assert_equal 1, destination.before_fork_count
       assert_nil destination.before_fork_timeout
+    end
+
+    def test_tail_sampling_before_fork_preserves_destination_rejection
+      destination = RejectingPreparationDestination.new
+      sampler = Julewire::TailSampling.new(destination: destination, sample_rate: 1)
+
+      assert_false sampler.before_fork!(timeout: 0.25)
+      assert_equal 1, destination.before_fork_count
+      assert_operator destination.before_fork_timeout, :>, 0
+      assert_operator destination.before_fork_timeout, :<=, 0.25
     end
 
     def test_tail_sampling_before_fork_skips_destination_without_hook_and_keeps_buffer

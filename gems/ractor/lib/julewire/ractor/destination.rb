@@ -111,8 +111,18 @@ module Julewire
         timeout = lifecycle_timeout(timeout)
         @fork_lifecycle_mutex.synchronize do
           @closed.set(true)
+          prepared_for_fork = @prepared_for_fork
           @prepared_for_fork = false
-          return true unless @worker
+          unless @worker
+            return true unless prepared_for_fork && @close_output
+
+            begin
+              start_worker
+            rescue StandardError => e
+              record_failure(e, phase: :worker_start)
+              return false
+            end
+          end
 
           result = request(:close, timeout: timeout, allow_closed: true)
           begin

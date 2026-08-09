@@ -767,7 +767,29 @@ module Julewire
       Julewire::Ractor::PortLifecycle.close(port) if port
     end
 
-    def test_closing_a_prepared_ractor_destination_prevents_restart
+    def test_closing_a_prepared_ractor_destination_closes_owned_output_without_restarting
+      port = ::Ractor::Port.new
+      destination = Julewire::Ractor::Destination.new(
+        output: RactorPortOutput.new(port),
+        close_output: true,
+        request_timeout: 0.1
+      )
+
+      assert_same destination, destination.before_fork!(timeout: 0.1)
+      assert_equal :flushed, receive_ractor(port)
+      assert_true destination.close(timeout: 0.1)
+      assert_equal :closed, receive_ractor(port)
+      assert_same destination, destination.after_fork!
+
+      assert_equal :closed, destination.health.fetch(:status)
+      assert_false destination.flush(timeout: 0.1)
+      assert_nil destination.instance_variable_get(:@worker)
+    ensure
+      cleanup_ractor_destination(destination)
+      Julewire::Ractor::PortLifecycle.close(port) if port
+    end
+
+    def test_closing_a_prepared_ractor_destination_leaves_borrowed_output_open
       port = ::Ractor::Port.new
       destination = Julewire::Ractor::Destination.new(
         output: RactorPortOutput.new(port),
@@ -777,12 +799,45 @@ module Julewire
       assert_same destination, destination.before_fork!(timeout: 0.1)
       assert_equal :flushed, receive_ractor(port)
       assert_true destination.close(timeout: 0.1)
+      assert_raises(Timeout::Error) { Timeout.timeout(0.02) { ::Ractor.select(port) } }
       assert_same destination, destination.after_fork!
 
       assert_equal :closed, destination.health.fetch(:status)
       assert_false destination.flush(timeout: 0.1)
       assert_nil destination.instance_variable_get(:@worker)
     ensure
+      cleanup_ractor_destination(destination)
+      Julewire::Ractor::PortLifecycle.close(port) if port
+    end
+
+    def test_closing_a_prepared_ractor_destination_reports_owned_output_restart_failure
+      port = ::Ractor::Port.new
+      failures = Queue.new
+      output = TestRactorDestination::MutableCopyabilityOutput.new(port)
+      destination = Julewire::Ractor::Destination.new(
+        output: output,
+        close_output: true,
+        request_timeout: 0.1,
+        on_failure: ->(error, metadata) { failures << [error, metadata] }
+      )
+
+      assert_same destination, destination.before_fork!(timeout: 0.1)
+      assert_equal :flushed, receive_ractor(port)
+
+      output.make_non_copyable!
+
+      assert_false destination.close(timeout: 0.1)
+
+      failure, metadata = safe_queue_pop(failures, timeout: 0.1)
+
+      assert_instance_of ArgumentError, failure
+      assert_match "ractor destination collaborators must be ractor-copyable or shareable", failure.message
+      assert_equal :worker_start, metadata.fetch(:phase)
+      assert_equal :closed, destination.health.fetch(:status)
+      assert_nil destination.instance_variable_get(:@worker)
+      assert_same destination, destination.after_fork!
+    ensure
+      output&.make_copyable!
       cleanup_ractor_destination(destination)
       Julewire::Ractor::PortLifecycle.close(port) if port
     end

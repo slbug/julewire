@@ -282,10 +282,11 @@ dropped record; a plain `false` is a rejected record and calls `on_drop` with
 `:destination_rejected`.
 
 Custom destinations may implement `before_fork!(timeout:)` to drain and stop
-resources that cannot survive a process fork, plus `after_fork!` for fork reset and
-`resource_identity` when multiple destinations share the same closeable
-resource. Transport adapters may expose adapter-specific lifecycle methods such
-as `reopen`.
+resources that cannot survive a process fork. Returning `false` rejects fork
+preparation; raising reports the failure and aborts preparation. Destinations
+may also implement `after_fork!` for fork reset and `resource_identity` when
+multiple destinations share the same closeable resource. Transport adapters
+may expose adapter-specific lifecycle methods such as `reopen`.
 
 The registered `:tail_sampling` destination kind wraps another destination for
 execution-level tail sampling. It buffers execution records until a summary

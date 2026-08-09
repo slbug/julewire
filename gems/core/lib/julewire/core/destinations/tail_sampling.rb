@@ -102,7 +102,9 @@ module Julewire
             raise Error, "tail-sampling destination could not flush before fork"
           end
 
-          @destination.before_fork!(timeout: Scheduling::Deadline.remaining(deadline))
+          result = @destination.before_fork!(timeout: Scheduling::Deadline.remaining(deadline))
+          return false if result == false
+
           self
         end
 

@@ -12,6 +12,7 @@ module Julewire
     cover Julewire::Core::Destinations::Registry
     cover Julewire::Core::Destinations::Sink
     cover "Julewire::Core::Destinations::Definition#build"
+    cover "Julewire::Core::Destinations::Destination#after_fork!"
     cover "Julewire::Core::Destinations::Destination#initialize"
     cover "Julewire::Core::Destinations::Destination#call_output_lifecycle_safely"
     cover "Julewire::Core::Destinations::Destination#record_loss"
@@ -167,6 +168,14 @@ module Julewire
 
       def after_fork!
         raise "output fork failed"
+      end
+    end
+
+    class UnsafeForkOutput
+      def write(_value); end
+
+      def after_fork!
+        raise Julewire::Core::UnsafeForkError, "unsafe output"
       end
     end
 
@@ -531,6 +540,14 @@ module Julewire
       destination = build_destination(output: StringIO.new)
 
       assert_same destination, destination.after_fork!
+    end
+
+    def test_direct_destination_after_fork_propagates_unsafe_fork_errors
+      destination = build_destination(output: UnsafeForkOutput.new)
+
+      error = assert_raises(Julewire::Core::UnsafeForkError) { destination.after_fork! }
+
+      assert_equal "unsafe output", error.message
     end
 
     def test_direct_destination_after_fork_resets_health

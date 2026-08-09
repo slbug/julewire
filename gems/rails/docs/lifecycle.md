@@ -16,8 +16,10 @@ that uses `julewire-ractor` must also quiesce Ractors before it forks. For Puma:
 
 ```ruby
 before_fork { Julewire.before_fork! }
-on_worker_boot { Julewire.after_fork! }
 ```
+
+Rails' fork tracker calls `Julewire.after_fork!` automatically in each child;
+do not repeat it from Puma's `on_worker_boot` hook.
 
 Stop application work before `before_fork`; do not create Ractors or emit from
 other threads until the fork finishes. If the Puma master continues logging
