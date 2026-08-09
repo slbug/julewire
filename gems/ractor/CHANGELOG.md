@@ -4,8 +4,8 @@
 
 - Quiesce destination workers before process forks and reject forks with live
   Ractors instead of rebuilding unsafe inherited VM state.
-- Serialize emit, close, and fork transitions; keep timed-out worker teardown
-  retryable.
+- Serialize emit, close, and fork transitions; preserve terminal closure and
+  keep interrupted worker teardown retryable.
 - Require julewire-core 1.1.3.
 - Refresh development tooling and compatibility locksets.
 
@@ -23,7 +23,8 @@
   shutdown so lifecycle operations cannot wait forever.
 - Harden queue accounting, fanout validation, worker stats, and Ractor-safe
   reply-timeout cleanup.
-- Rebuild pre-fork-quiesced destination workers in forked child processes.
+- Discard inherited Ractor handles before rebuilding destination workers in a
+  forked child process.
 - Normalize application emit input before strict bridge serialization while
   keeping integration-owned emits on a non-normalizing Symbol-key path.
 - Require julewire-core 1.1.0.

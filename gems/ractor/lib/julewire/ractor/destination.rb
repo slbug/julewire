@@ -85,7 +85,7 @@ module Julewire
         @on_drop = on_drop
         @on_failure = on_failure
         @fork_lifecycle_mutex = Mutex.new
-        initialize_tracking
+        initialize_tracking(closed: false)
         start_worker
       end
 
@@ -111,6 +111,7 @@ module Julewire
         timeout = lifecycle_timeout(timeout)
         @fork_lifecycle_mutex.synchronize do
           @closed.set(true)
+          @prepared_for_fork = false
           return true unless @worker
 
           result = request(:close, timeout: timeout, allow_closed: true)
@@ -128,14 +129,16 @@ module Julewire
         timeout = lifecycle_timeout(timeout)
         @fork_lifecycle_mutex.synchronize do
           validate_before_fork_process!
-          return self if @prepared_for_fork
-
-          @closed.set(true)
           deadline = Core::Scheduling::Deadline.for(timeout)
           remaining_timeout = -> { Core::Scheduling::Deadline.remaining(deadline) }
+          if closed?
+            close_ports(timeout: remaining_timeout.call) if @worker
+            return self
+          end
+
+          @closed.set(true)
           flush_before_fork!(remaining_timeout.call)
           stop_before_fork!(remaining_timeout.call)
-          @prepared_for_fork = true
         end
         self
       rescue StandardError => e
@@ -144,12 +147,7 @@ module Julewire
       end
 
       def after_fork!
-        validate_after_fork_process!
-        return self unless @prepared_for_fork
-
-        initialize_tracking
-        start_worker
-        @prepared_for_fork = false
+        @fork_lifecycle_mutex.synchronize { resume_after_fork! }
         self
       rescue UnsafeForkError => e
         record_failure(e, phase: :after_fork)
@@ -201,13 +199,15 @@ module Julewire
 
       def validate_before_fork_process!
         return if @process_id == Process.pid
+        return unless @worker
 
         raise UnsafeForkError,
               "ractor destination was inherited without Julewire.before_fork! in the parent process"
       end
 
       def validate_after_fork_process!
-        return if @process_id == Process.pid || @prepared_for_fork
+        return if @process_id == Process.pid
+        return unless @worker
 
         raise UnsafeForkError,
               "ractor destination was inherited without Julewire.before_fork! in the parent process"
@@ -221,8 +221,23 @@ module Julewire
       end
 
       def stop_before_fork!(timeout)
+        # Mark preparation before teardown so every failure remains recoverable
+        # through the paired after-fork rollback.
+        @prepared_for_fork = true
         @port.send(WORKER_QUIESCE_MESSAGE)
         close_ports(timeout: timeout)
+      end
+
+      def resume_after_fork!
+        validate_after_fork_process!
+        return unless @prepared_for_fork
+
+        # Quiesce is terminal and ordered after the completed flush. Replace
+        # any retained handles before starting the recovery worker.
+        initialize_tracking(closed: true)
+        start_worker
+        @closed.set(false)
+        @prepared_for_fork = false
       end
 
       def validate_callable(callable, name:)
@@ -230,10 +245,10 @@ module Julewire
         callable
       end
 
-      def initialize_tracking
+      def initialize_tracking(closed:)
         @process_id = Process.pid
         @scheduler = ReplyTimeoutScheduler.new(timeout_value: false)
-        @closed = Concurrent::AtomicReference.new
+        @closed = Concurrent::AtomicReference.new(closed)
         @health = Core::Integration::DestinationHealth.new(counter_keys: COUNTER_KEYS, failure_counter: nil)
         @queue_slots = QueueSlots.new(max_queue: @max_queue)
         @worker_health = Concurrent::AtomicReference.new
