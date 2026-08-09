@@ -28,10 +28,12 @@ module Julewire
         end
 
         def handle(event_name, _event)
-          return Julewire.before_fork! if event_name == BEFORE_FORK_EVENT
-
-          IntegrationHealth.with_failure_health(action: :after_fork, component: :fork_hooks, event: event_name) do
-            Julewire.after_fork!
+          if event_name == BEFORE_FORK_EVENT
+            Julewire.before_fork!
+          else
+            IntegrationHealth.with_failure_health(action: :after_fork, component: :fork_hooks, event: event_name) do
+              Julewire.after_fork!
+            end
           end
         end
 
