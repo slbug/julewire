@@ -748,6 +748,12 @@ module Julewire
       assert_same destination, destination.before_fork!(timeout: 0.1)
       assert_same destination, destination.after_fork!
 
+      process_id = destination.instance_variable_get(:@process_id)
+      destination.instance_variable_set(:@process_id, process_id - 1)
+
+      assert_same destination, destination.before_fork!(timeout: 0.1)
+      assert_same destination, destination.after_fork!
+
       destination.emit(record(message: "closed-after-fork"))
 
       assert_equal :closed_dropped, safe_queue_pop(drops)
@@ -756,6 +762,7 @@ module Julewire
       assert_equal 1, destination.health.dig(:counts, :closed_dropped)
       assert_nil destination.instance_variable_get(:@worker)
     ensure
+      destination.instance_variable_set(:@process_id, process_id) if destination && process_id
       cleanup_ractor_destination(destination)
       Julewire::Ractor::PortLifecycle.close(port) if port
     end
