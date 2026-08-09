@@ -63,11 +63,16 @@ module JulewireCapture
   end
 
   def profile_subscriptions(monitor)
-    Array(monitor.subscriptions) - %w[
+    subscriptions = Array(monitor.subscriptions).dup
+    %w[
       swarm.manager.before_fork
       swarm.node.after_fork
       swarm.manager.after_fork
-    ]
+    ].each do |event_name|
+      index = subscriptions.index(event_name)
+      subscriptions.delete_at(index) if index
+    end
+    subscriptions
   end
 
   def captured_severity(listener, event, payload)

@@ -71,16 +71,17 @@ module Julewire
 
         def event_names(monitor, configuration, profile)
           configured = configuration.public_send(profile.config_method)
-          return profile.important_events if configured == :important
+          selected_events =
+            if configured == :important
+              profile.important_events
+            elsif all_events?(configured)
+              available_events = available_events_for(monitor)
+              available_events.empty? ? profile.important_events : available_events
+            else
+              Array(configured)
+            end
 
-          if all_events?(configured)
-            available_events = available_events_for(monitor)
-            return available_events unless available_events.empty?
-
-            return profile.important_events
-          end
-
-          Array(configured)
+          selected_events - profile.reserved_events
         end
 
         def available_events_for(monitor)

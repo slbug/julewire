@@ -10,6 +10,7 @@ module Julewire
         :messaging_role,
         :config_method,
         :important_events,
+        :reserved_events,
         :severity
       )
 
@@ -20,6 +21,7 @@ module Julewire
         messaging_role: :consumer,
         config_method: :consumer_event_names,
         important_events: Configuration::IMPORTANT_CONSUMER_EVENT_NAMES,
+        reserved_events: %w[swarm.manager.before_fork].freeze,
         severity: ->(name, event, payload) { EventSeverity.consumer(name, event: event, payload: payload) }
       ).freeze
       PRODUCER = Profile.new(
@@ -29,6 +31,7 @@ module Julewire
         messaging_role: :producer,
         config_method: :producer_event_names,
         important_events: Configuration::IMPORTANT_PRODUCER_EVENT_NAMES,
+        reserved_events: [].freeze,
         severity: ->(name, _event, payload) { EventSeverity.producer(name, payload) }
       ).freeze
       private_constant :Profile, :CONSUMER, :PRODUCER

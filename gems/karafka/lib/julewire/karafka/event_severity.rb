@@ -12,7 +12,6 @@ module Julewire
       DEBUG_CONSUMER_EVENTS = %w[
         connection.listener.fetch_loop
         statistics.emitted
-        swarm.manager.before_fork
         swarm.manager.control
       ].freeze
 

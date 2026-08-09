@@ -4,6 +4,8 @@
 Set `consumer_event_names = :all` to subscribe to Karafka's registered monitor
 events, or pass an explicit event list for application policy. If the monitor
 cannot expose its registered events, `:all` uses the important profile.
+`swarm.manager.before_fork` is reserved for lifecycle preparation and is never
+routed through the generic event listener, even when selected explicitly.
 
 `install!` also subscribes lightweight handlers for
 `swarm.manager.before_fork`, `swarm.node.after_fork`, and

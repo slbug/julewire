@@ -95,12 +95,11 @@ module Julewire
       %w[
         connection.listener.fetch_loop
         statistics.emitted
-        swarm.manager.before_fork
         swarm.manager.control
       ].each { listener.emit(it, FakeEvent.new) }
       severities = records.map { it[:severity] }
 
-      assert_equal %i[error error debug debug debug debug], severities
+      assert_equal %i[error error debug debug debug], severities
     end
 
     def test_listener_matches_additional_default_severities
