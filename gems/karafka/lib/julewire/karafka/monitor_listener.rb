@@ -3,43 +3,13 @@
 module Julewire
   module Karafka
     class MonitorListener
-      Profile = Data.define(
-        :component,
-        :event_prefix,
-        :logger_name,
-        :messaging_role,
-        :config_method,
-        :important_events,
-        :severity
-      )
-
-      CONSUMER_PROFILE = Profile.new(
-        component: :listener,
-        event_prefix: "karafka",
-        logger_name: "Karafka.monitor",
-        messaging_role: :consumer,
-        config_method: :consumer_event_names,
-        important_events: Configuration::IMPORTANT_CONSUMER_EVENT_NAMES,
-        severity: ->(name, event, payload) { EventSeverity.consumer(name, event: event, payload: payload) }
-      ).freeze
-      PRODUCER_PROFILE = Profile.new(
-        component: :waterdrop_listener,
-        event_prefix: "waterdrop",
-        logger_name: "WaterDrop.monitor",
-        messaging_role: :producer,
-        config_method: :producer_event_names,
-        important_events: Configuration::IMPORTANT_PRODUCER_EVENT_NAMES,
-        severity: ->(name, _event, payload) { EventSeverity.producer(name, payload) }
-      ).freeze
-      private_constant :Profile, :CONSUMER_PROFILE, :PRODUCER_PROFILE
-
       class << self
         def consumer(configuration = Configuration.new)
-          new(configuration, profile: CONSUMER_PROFILE)
+          new(configuration, profile: MonitorProfiles.consumer)
         end
 
         def producer(configuration = Configuration.new)
-          new(configuration, profile: PRODUCER_PROFILE)
+          new(configuration, profile: MonitorProfiles.producer)
         end
       end
 

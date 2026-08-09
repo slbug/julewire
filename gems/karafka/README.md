@@ -45,7 +45,8 @@ Default behavior:
 - important consumer and producer monitor events become point records
 - message headers carry Julewire propagation carriers
 - `with_message` restores message context and adds message attributes
-- Karafka fork hooks call `Julewire.after_fork!`
+- Karafka swarm hooks quiesce Julewire before manager forks and reset it after
+  manager and worker forks
 - text logger listeners are not parsed or deduplicated
 
 Inbound Kafka carriers are trusted by default for internal service traffic. Set

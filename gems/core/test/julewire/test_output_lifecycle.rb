@@ -121,10 +121,27 @@ module Julewire
   end
 
   class ForkAwareOutput < WriteOnlyOutput
-    attr_reader :after_fork_count
+    attr_reader :after_fork_count, :before_fork_count, :before_fork_timeout
+
+    def initialize
+      @after_fork_count = 0
+      @before_fork_count = 0
+    end
 
     def after_fork!
-      @after_fork_count = after_fork_count.to_i + 1
+      @after_fork_count += 1
+    end
+
+    def before_fork!(timeout: nil)
+      @before_fork_count += 1
+      @before_fork_timeout = timeout
+    end
+  end
+
+  class RejectingForkOutput < ForkAwareOutput
+    def before_fork!(timeout: nil) # rubocop:disable Naming/PredicateMethod -- Fork protocol uses false for rejection.
+      super
+      false
     end
   end
 
@@ -158,6 +175,7 @@ module Julewire
 
   class TestOutputLifecycle < Minitest::Test
     cover Julewire::Core::Destinations::ChaosOutput
+    cover "Julewire::Core::Destinations::Destination#before_fork!"
     cover "Julewire::Core::Destinations::Destination#call_output_lifecycle_safely"
     cover Julewire::Core::Destinations::SynchronizedOutput
     cover Julewire::Core::Scheduling::Deadline
@@ -273,6 +291,45 @@ module Julewire
       assert_equal 1, raw_output.after_fork_count
     end
 
+    def test_output_wrappers_forward_before_fork_timeout
+      outputs = Array.new(3) { ForkAwareOutput.new }
+      wrappers = lifecycle_wrappers(outputs)
+
+      wrappers.each { assert_same it, it.before_fork!(timeout: 0.25) }
+      outputs.each do |output|
+        assert_equal 1, output.before_fork_count
+        assert_in_delta 0.25, output.before_fork_timeout
+      end
+    end
+
+    def test_output_wrappers_accept_missing_optional_before_fork_hook
+      outputs = lifecycle_wrappers(Array.new(3) { WriteOnlyOutput.new })
+
+      outputs.each { assert_same it, it.before_fork! }
+    end
+
+    def test_output_wrappers_forward_default_before_fork_timeout
+      outputs = Array.new(3) { ForkAwareOutput.new }
+      wrappers = lifecycle_wrappers(outputs)
+
+      wrappers.each { assert_same it, it.before_fork! }
+      outputs.each do |output|
+        assert_equal 1, output.before_fork_count
+        assert_nil output.before_fork_timeout
+      end
+    end
+
+    def test_output_wrappers_preserve_explicit_before_fork_rejection
+      outputs = Array.new(3) { RejectingForkOutput.new }
+      wrappers = lifecycle_wrappers(outputs)
+
+      wrappers.each { assert_false it.before_fork!(timeout: 0.25) }
+      outputs.each do |output|
+        assert_equal 1, output.before_fork_count
+        assert_in_delta 0.25, output.before_fork_timeout
+      end
+    end
+
     def test_config_close_output_controls_output_ownership
       caller_owned = CloseableOutput.new
       julewire_owned = CloseableOutput.new
@@ -329,6 +386,9 @@ module Julewire
       assert_equal 1, raw_output.close_count
       assert_same pass_through, pass_through.after_fork!
       assert_equal 1, raw_output.after_fork_count
+      assert_same pass_through, pass_through.before_fork!(timeout: 0.25)
+      assert_equal 1, raw_output.before_fork_count
+      assert_in_delta 0.25, raw_output.before_fork_timeout
     end
 
     def test_chaos_output_pass_through_returns_delegate_result
@@ -514,6 +574,14 @@ module Julewire
       safe_thread_value(thread)
     ensure
       cleanup_thread(thread, timeout: 0)
+    end
+
+    def lifecycle_wrappers(outputs)
+      [
+        Julewire::Core::Destinations::ChaosOutput.new(outputs.fetch(0)),
+        Julewire::Core::Destinations::SynchronizedOutput.new(outputs.fetch(1)),
+        build_destination(output: outputs.fetch(2))
+      ]
     end
   end
 end

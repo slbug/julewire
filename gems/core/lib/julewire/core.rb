@@ -65,6 +65,7 @@ module Julewire
   Tail = Core::Diagnostics::Tail
   TailSampling = Core::Destinations::TailSampling
   TextEncoder = Core::Serialization::TextEncoder
+  UnsafeForkError = Core::UnsafeForkError
 
   Core::Processing.register(:sampling) do |rate:, key: nil|
     Core::Processing::Sampling.head(rate: rate, key: key)

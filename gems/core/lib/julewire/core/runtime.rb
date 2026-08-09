@@ -155,6 +155,19 @@ module Julewire
         RuntimeRegistry.reset_after_fork(primary: self)
       end
 
+      def before_fork!(timeout: nil)
+        reject_runtime_call_during_configure!(:before_fork!)
+        RuntimeRegistry.prepare_before_fork(primary: self, timeout: timeout)
+      end
+
+      def before_fork_runtime!(timeout:)
+        runtime_state.pipeline.before_fork!(timeout: timeout)
+      end
+
+      def cancel_before_fork_runtime!
+        runtime_state.pipeline.cancel_before_fork!
+      end
+
       def reset_after_fork_runtime!
         reset_after_fork_state!
         runtime_state.pipeline.after_fork!

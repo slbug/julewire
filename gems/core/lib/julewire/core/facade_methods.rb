@@ -152,6 +152,11 @@ module Julewire
 
       def labels = runtime.labels
       def after_fork! = runtime.after_fork!
+
+      def before_fork!(timeout: nil)
+        runtime.before_fork!(timeout: timeout)
+      end
+
       def reset! = runtime.reset_facade!
 
       def close(timeout: UNSET)

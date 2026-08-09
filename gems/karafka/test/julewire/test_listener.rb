@@ -7,6 +7,7 @@ module Julewire
     cover "Julewire::Karafka::EventSeverity.error_severity"
     cover "Julewire::Karafka::Installer.install!"
     cover Julewire::Karafka::MonitorListener
+    cover "Julewire::Karafka::MonitorProfiles*"
     cover "Julewire::Karafka::MonitorSubscription*"
     cover "Julewire::Karafka::MonitorListener#messaging_attributes"
     cover "Julewire::Karafka::MonitorListener.producer"
@@ -80,8 +81,8 @@ module Julewire
       require "karafka/instrumentation/notifications"
 
       events = Julewire::Karafka::Configuration::IMPORTANT_CONSUMER_EVENT_NAMES +
-               Julewire::Karafka::EventSeverity.const_get(:DEBUG_CONSUMER_EVENTS, false) +
-               Julewire::Karafka::EventSeverity.const_get(:ERROR_CONSUMER_EVENTS, false) +
+               Julewire::Karafka::EventSeverity::DEBUG_CONSUMER_EVENTS +
+               Julewire::Karafka::EventSeverity::ERROR_CONSUMER_EVENTS +
                Julewire::Karafka::EventPayload.const_get(:CONSUMER_BATCH_EVENTS, false) +
                Julewire::Karafka::ForkHooks.const_get(:EVENTS, false) +
                %w[
@@ -197,6 +198,34 @@ module Julewire
 
       refute_empty monitor.listeners.fetch("consumer.consumed")
       refute_empty monitor.listeners.fetch("statistics.emitted")
+      assert_equal 1, monitor.listeners.fetch("swarm.manager.before_fork").size
+      assert_equal 2, monitor.listeners.fetch("swarm.node.after_fork").size
+    end
+
+    def test_listener_does_not_emit_reserved_before_fork_event_from_all_profile
+      records = capture_records
+      monitor = ::Karafka::Instrumentation::Monitor.new
+
+      subscribe_all_events(:consumer, monitor, :consumer_event_names)
+      monitor.instrument("swarm.manager.before_fork")
+
+      assert_empty records
+    ensure
+      Julewire.after_fork!
+    end
+
+    def test_listener_does_not_emit_explicit_reserved_before_fork_event
+      records = capture_records
+      monitor = ::Karafka::Instrumentation::Monitor.new
+      configuration = Julewire::Karafka::Configuration.new
+      configuration.consumer_event_names = %w[swarm.manager.before_fork]
+
+      install_consumer_listener(monitor, configuration: configuration)
+      monitor.instrument("swarm.manager.before_fork")
+
+      assert_empty records
+    ensure
+      Julewire.after_fork!
     end
 
     def test_listener_can_subscribe_to_default_all_events_without_available_events

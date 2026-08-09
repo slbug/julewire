@@ -74,6 +74,8 @@ module Julewire
           initialize_tracking
           @output.after_fork!
           self
+        rescue UnsafeForkError
+          raise
         rescue StandardError => e
           notify_failure(
             e,
@@ -81,6 +83,12 @@ module Julewire
             output_class: output_class_name,
             phase: :output_lifecycle
           )
+          self
+        end
+
+        def before_fork!(timeout: nil)
+          return false if @output.before_fork!(timeout: timeout) == false
+
           self
         end
 

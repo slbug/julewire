@@ -86,8 +86,25 @@ module Julewire
           @mutex.synchronize { initialize_buffer }
           @destination.after_fork! if @destination.respond_to?(:after_fork!)
           self
+        rescue UnsafeForkError
+          raise
         rescue StandardError => e
           record_failure(e, nil, phase: :after_fork)
+          self
+        end
+
+        def before_fork!(timeout: nil)
+          return self unless @destination.respond_to?(:before_fork!)
+
+          Validation.validate_timeout!(timeout, name: :timeout)
+          deadline = Scheduling::Deadline.for(timeout)
+          unless flush(timeout: Scheduling::Deadline.remaining(deadline))
+            raise Error, "tail-sampling destination could not flush before fork"
+          end
+
+          result = @destination.before_fork!(timeout: Scheduling::Deadline.remaining(deadline))
+          return false if result == false
+
           self
         end
 

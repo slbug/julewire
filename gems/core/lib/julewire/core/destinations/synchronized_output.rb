@@ -22,6 +22,17 @@ module Julewire
           self
         end
 
+        def before_fork!(timeout: nil)
+          result = @lifecycle_mutex.synchronize do
+            @mutex.synchronize do
+              @output.before_fork!(timeout: timeout) if @output.respond_to?(:before_fork!)
+            end
+          end
+          return false if result == false
+
+          self
+        end
+
         def output_class_name = @output.class.name
 
         def resource_identity = @output

@@ -24,5 +24,6 @@ gem "rubocop", ">= 1.87"
 gem "rubocop-minitest", ">= 0.39"
 gem "rubocop-performance", ">= 1.26"
 gem "rubocop-rake", ">= 0.7"
+gem "rubydex", require: false
 gem "simplecov", ">= 1.0.0"
 gem "simplecov-lcov", ">= 0.9"

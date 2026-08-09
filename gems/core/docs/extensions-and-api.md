@@ -281,10 +281,12 @@ return without raising unless they return `false`.
 dropped record; a plain `false` is a rejected record and calls `on_drop` with
 `:destination_rejected`.
 
-Custom destinations may also implement `after_fork!` for fork reset and
-`resource_identity` when multiple destinations share the same closeable
-resource. Transport adapters may expose adapter-specific lifecycle methods such
-as `reopen`.
+Custom destinations may implement `before_fork!(timeout:)` to drain and stop
+resources that cannot survive a process fork. Returning `false` rejects fork
+preparation; raising reports the failure and aborts preparation. Destinations
+may also implement `after_fork!` for fork reset and `resource_identity` when
+multiple destinations share the same closeable resource. Transport adapters
+may expose adapter-specific lifecycle methods such as `reopen`.
 
 The registered `:tail_sampling` destination kind wraps another destination for
 execution-level tail sampling. It buffers execution records until a summary
@@ -399,12 +401,17 @@ should accept keyword metadata.
 `contracts.md` owns the public facade inventory. This section covers usage
 details that extension and integration authors usually need.
 
+Integrations can register a fail-loud safety hook with
+`Julewire::Core::Integration::Lifecycle.register_before_fork(:integration_name,
+component: :component_name) { ... }`. It runs after destinations have quiesced;
+an exception aborts preparation and resumes destinations already prepared.
+
 Integrations that keep process-local state can register a reset hook with
 `Julewire::Core::Integration::Lifecycle.register_after_fork(:integration_name,
 component: :component_name) { ... }`. The hook runs after core has refreshed its
 own process-local state and after the active pipeline has forwarded
 `after_fork!` to destinations.
-Both hook names are strict integration identifiers: pass non-empty Symbols.
+All integration and component hook names are strict identifiers: pass non-empty Symbols.
 String or non-Symbol names raise at registration and are never normalized.
 
 `Julewire.observe_self!(runtime_name = :default, target: :meta)` starts a
@@ -431,6 +438,8 @@ Lifecycle:
 
 - `Integration::Lifecycle.require_optional(path)` for contained optional
   requires.
+- `Integration::Lifecycle.register_before_fork(:integration_name,
+  component: :component_name) { ... }` for fail-loud process preparation.
 - `Integration::Lifecycle.register_after_fork(:integration_name,
   component: :component_name) { ... }` for process-local integration state.
 - `Integration::IvarState` for idempotent framework subscriber state.

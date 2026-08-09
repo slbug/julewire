@@ -15,6 +15,10 @@ module Julewire
           def register_after_fork(integration, component:, &)
             ForkHooks.register(integration, component: component, &)
           end
+
+          def register_before_fork(integration, component:, &)
+            BeforeForkHooks.register(integration, component: component, &)
+          end
         end
       end
     end

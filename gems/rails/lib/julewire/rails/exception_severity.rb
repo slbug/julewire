@@ -4,7 +4,7 @@ module Julewire
   module Rails
     module ExceptionSeverity
       HEADER = "action_dispatch.debug_exception_log_level"
-      SEVERITY = ::Julewire::Core::Records::Severity
+      SEVERITY = Julewire::Core::Records::Severity
       private_constant :HEADER, :SEVERITY
 
       class << self

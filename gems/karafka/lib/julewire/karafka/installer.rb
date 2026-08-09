@@ -10,7 +10,7 @@ module Julewire
 
           ForkHooks.subscribe!(monitor, configuration: configuration)
           if configuration.consumer_events?
-            MonitorSubscription.install!(monitor, configuration: configuration, profile: :consumer)
+            MonitorSubscription.install!(monitor, configuration: configuration, profile: MonitorProfiles.consumer)
           end
           monitor
         end

@@ -10,7 +10,8 @@ inherit_mode:
 AllCops:
   TargetRubyVersion: 3.4
   NewCops: enable
-  UseCache: false
+  UseCache: true
+  UseProjectIndex: true
   Exclude:
     - "**/tmp/**/*"
     - "**/vendor/**/*"

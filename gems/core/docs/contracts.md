@@ -9,7 +9,9 @@ These APIs are for application code and scripts:
 
 - Runtime configuration and lifecycle: `Julewire.configure`,
   `Julewire.config`, `Julewire.reset!`, `Julewire.flush`, `Julewire.close`,
-  `Julewire.after_fork!`, and `Julewire.health`.
+  `Julewire.before_fork!`, `Julewire.after_fork!`, and `Julewire.health`.
+- `Julewire::UnsafeForkError` for pre-fork safety failures that must abort
+  process creation.
 - `Julewire.runtime` for explicit secondary pipelines with independent
   configuration, destinations, processors, health, and lifecycle.
 - `Julewire.labels` for process labels shared by the active runtime.
@@ -91,7 +93,8 @@ but they are not intended as general application API:
 - `Julewire::Core::Integration::Values::Shape` for normalized timestamps, payload
   normalization, field appends, and source-location shaping.
 - `Julewire::Core::Integration::Lifecycle` for optional require containment and
-  process-local `after_fork` hooks.
+  process-local before/after-fork hooks. Hook identifiers are strict Symbols;
+  before-fork failures propagate while after-fork failures are health-contained.
 - `Julewire::Core::Integration` helper classes/modules for one-time ivar state,
   subscriber install helpers, event-subscriber health wrappers, config settings
   helpers, and subscription handles.

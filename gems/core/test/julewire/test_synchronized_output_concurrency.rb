@@ -171,6 +171,87 @@ module Julewire
       end
     end
 
+    class BlockingBeforeForkOutput
+      WAIT_TIMEOUT = 1
+
+      def initialize
+        @before_fork_started = Queue.new
+        @flush_started = Queue.new
+        @release_before_fork = Queue.new
+        @release_write = Queue.new
+        @write_started = Queue.new
+      end
+
+      def write(_value)
+        @write_started << true
+        @release_write.pop
+      end
+
+      def flush
+        @flush_started << true
+      end
+
+      def before_fork!(timeout: nil)
+        @before_fork_started << timeout
+        @release_before_fork.pop
+      end
+
+      def before_fork_started(timeout: WAIT_TIMEOUT) = @before_fork_started.pop(timeout: timeout)
+      def flush_started(timeout: WAIT_TIMEOUT) = @flush_started.pop(timeout: timeout)
+      def release_before_fork = @release_before_fork << true
+      def release_write = @release_write << true
+      def write_started = @write_started.pop(timeout: WAIT_TIMEOUT)
+    end
+
+    def test_before_fork_waits_for_in_flight_write
+      raw_output = BlockingBeforeForkOutput.new
+      output = Julewire::Core::Destinations::SynchronizedOutput.new(raw_output)
+      writer = safe_thread { output.write("held") }
+
+      assert raw_output.write_started
+
+      preparing = safe_thread { output.before_fork!(timeout: 0.25) }
+
+      assert_nil raw_output.before_fork_started(timeout: 0.05)
+
+      raw_output.release_write
+
+      safe_thread_value(writer)
+
+      assert_in_delta 0.25, raw_output.before_fork_started
+
+      raw_output.release_before_fork
+
+      assert_same output, safe_thread_value(preparing)
+    ensure
+      raw_output&.release_write
+      raw_output&.release_before_fork
+      safe_thread_value(writer) if writer&.alive?
+      safe_thread_value(preparing) if preparing&.alive?
+    end
+
+    def test_before_fork_serializes_other_lifecycle_calls
+      raw_output = BlockingBeforeForkOutput.new
+      output = Julewire::Core::Destinations::SynchronizedOutput.new(raw_output)
+      preparing = safe_thread { output.before_fork!(timeout: 0.25) }
+
+      assert_in_delta 0.25, raw_output.before_fork_started
+
+      flusher = safe_thread { output.flush }
+
+      assert_nil raw_output.flush_started(timeout: 0.05)
+
+      raw_output.release_before_fork
+
+      assert_same output, safe_thread_value(preparing)
+      assert_true safe_thread_value(flusher)
+      assert raw_output.flush_started
+    ensure
+      raw_output&.release_before_fork
+      safe_thread_value(preparing) if preparing&.alive?
+      safe_thread_value(flusher) if flusher&.alive?
+    end
+
     def test_write_started_during_terminal_close_is_rejected_after_close
       raw_output = BlockingCloseOutput.new
       output = Julewire::Core::Destinations::SynchronizedOutput.new(raw_output, close_output: true)

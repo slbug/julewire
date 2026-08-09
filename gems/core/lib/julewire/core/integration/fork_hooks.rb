@@ -15,8 +15,8 @@ module Julewire
           def register(integration, component:, &callback)
             raise ArgumentError, "block required" unless callback
 
-            validate_symbol_name!(integration, name: :integration)
-            validate_symbol_name!(component, name: :component)
+            HookNames.validate!(integration, name: :integration)
+            HookNames.validate!(component, name: :component)
             register_entry(integration, component, callback)
           end
 
@@ -42,11 +42,6 @@ module Julewire
               action: :after_fork,
               component: entry.component
             )
-          end
-
-          def validate_symbol_name!(value, name:)
-            raise TypeError, "#{name} must be a Symbol" unless value.instance_of?(Symbol)
-            raise ArgumentError, "#{name} is required" if value == :""
           end
         end
       end

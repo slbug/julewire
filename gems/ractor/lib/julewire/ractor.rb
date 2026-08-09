@@ -38,6 +38,7 @@ module Julewire
   loader = Zeitwerk::Loader.for_gem_extension(self)
   loader.setup
   Core::Destinations.register(:ractor) { |name:, **options| Ractor::Destination.new(name: name, **options) }
+  Core::Integration::Lifecycle.register_before_fork(:ractor, component: :bridge) { Ractor::Bridge.before_fork! }
   Core::Integration::Lifecycle.register_after_fork(:ractor, component: :bridge) { Ractor::Bridge.after_fork! }
 
   class << self

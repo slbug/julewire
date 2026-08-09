@@ -45,6 +45,7 @@ module Julewire
 
   class TestRactorDestinationConcurrentQueue < Minitest::Test
     cover "Julewire::Ractor::Destination#emit"
+    cover "Julewire::Ractor::Destination#enqueue"
     cover "Julewire::Ractor::Destination#handle_ack"
     cover "Julewire::Ractor::Destination#release_slot"
     cover "Julewire::Ractor::Destination::QueueSlots#reserve"
@@ -190,8 +191,8 @@ module Julewire
     include RactorRecordHelper
 
     class DestinationProbe
-      attr_reader :close_timeout, :emitted, :flush_timeout, :forks, :health_calls, :name
-      attr_writer :emit_error, :flush_error, :fork_error
+      attr_reader :before_fork_timeout, :close_timeout, :emitted, :flush_timeout, :forks, :health_calls, :name
+      attr_writer :before_fork_error, :before_fork_result, :emit_error, :flush_error, :fork_error, :fork_order
 
       def initialize(
         name:,
@@ -211,6 +212,7 @@ module Julewire
         @close_result = close_result
         @health_error = health_error
         @fork_error = fork_error
+        @before_fork_result = true
         @emitted = []
         @forks = 0
         @health_calls = 0
@@ -240,8 +242,16 @@ module Julewire
       def after_fork!
         raise @fork_error if @fork_error
 
+        @fork_order << name if @fork_order
         @forks += 1
         self
+      end
+
+      def before_fork!(timeout: nil)
+        @before_fork_timeout = timeout
+        raise @before_fork_error if @before_fork_error
+
+        @before_fork_result
       end
 
       def health
@@ -254,6 +264,10 @@ module Julewire
 
     class NoForkDestinationProbe < DestinationProbe
       undef_method :after_fork!
+    end
+
+    class NoBeforeForkDestinationProbe < DestinationProbe
+      undef_method :before_fork!
     end
 
     def test_ractor_fanout_defaults_name_and_resource_identity
@@ -547,6 +561,88 @@ module Julewire
       assert_equal :ok, fanout.health.fetch(:status)
     end
 
+    def test_ractor_fanout_after_fork_propagates_unsafe_fork_errors
+      error = Julewire::Core::UnsafeForkError.new("unsafe")
+      destination = DestinationProbe.new(name: :worker, fork_error: error)
+      fanout = Julewire::Ractor::Fanout.new(destinations: [destination])
+
+      raised = assert_raises(Julewire::Core::UnsafeForkError) { fanout.after_fork! }
+
+      assert_same error, raised
+    end
+
+    def test_ractor_fanout_before_fork_forwards_a_shared_deadline
+      first = DestinationProbe.new(name: :first)
+      second = DestinationProbe.new(name: :second)
+      plain = NoBeforeForkDestinationProbe.new(name: :plain)
+      fanout = Julewire::Ractor::Fanout.new(destinations: [first, plain, second])
+
+      assert_same fanout, fanout.before_fork!(timeout: 0.25)
+
+      assert_operator first.before_fork_timeout, :>, 0
+      assert_operator first.before_fork_timeout, :<=, 0.25
+      assert_operator second.before_fork_timeout, :>, 0
+      assert_operator second.before_fork_timeout, :<=, first.before_fork_timeout
+      assert_nil plain.before_fork_timeout
+    end
+
+    def test_ractor_fanout_before_fork_failure_resumes_prepared_destinations
+      order = []
+      first = DestinationProbe.new(name: :first)
+      second = DestinationProbe.new(name: :second)
+      first.fork_order = order
+      second.fork_order = order
+      second.before_fork_error = RuntimeError.new("unsafe")
+      fanout = Julewire::Ractor::Fanout.new(destinations: [first, second])
+
+      error = assert_raises(RuntimeError) { fanout.before_fork! }
+
+      assert_equal "unsafe", error.message
+      assert_equal 1, first.forks
+      assert_equal 1, second.forks
+      assert_equal %i[second first], order
+    end
+
+    def test_ractor_fanout_before_fork_preserves_failure_when_rollback_also_fails
+      first = DestinationProbe.new(name: :first, fork_error: RuntimeError.new("rollback failed"))
+      second = DestinationProbe.new(name: :second)
+      second.before_fork_error = RuntimeError.new("unsafe")
+      fanout = Julewire::Ractor::Fanout.new(destinations: [first, second])
+
+      error = assert_raises(RuntimeError) { fanout.before_fork! }
+      health = fanout.health
+
+      assert_equal "unsafe", error.message
+      assert_equal :after_fork, health.dig(:last_failure, :action)
+      assert_equal :first, health.dig(:last_failure, :destination)
+      assert_equal "RuntimeError", health.dig(:last_failure, :class)
+    end
+
+    def test_ractor_fanout_before_fork_rejects_false_and_resumes_attempted_destination
+      order = []
+      first = DestinationProbe.new(name: :first)
+      rejecting = DestinationProbe.new(name: :rejecting)
+      first.fork_order = order
+      rejecting.fork_order = order
+      rejecting.before_fork_result = false
+      fanout = Julewire::Ractor::Fanout.new(destinations: [first, rejecting])
+
+      error = assert_raises(Julewire::Core::Error) { fanout.before_fork! }
+
+      assert_equal "destination rejecting rejected before_fork", error.message
+      assert_equal %i[rejecting first], order
+    end
+
+    def test_ractor_fanout_before_fork_validates_timeout_before_preparing_destinations
+      destination = DestinationProbe.new(name: :worker)
+      fanout = Julewire::Ractor::Fanout.new(destinations: [destination])
+
+      error = assert_raises(ArgumentError) { fanout.before_fork!(timeout: -1) }
+
+      assert_equal "timeout must be nil or a non-negative finite Numeric", error.message
+      assert_nil destination.before_fork_timeout
+    end
+
     def test_ractor_fanout_failure_callbacks_are_contained
       bad = DestinationProbe.new(name: :bad, emit_error: RuntimeError.new("emit failed"))
       fanout = Julewire::Ractor::Fanout.new(
@@ -599,6 +695,7 @@ module Julewire
 
   class TestRactorDestinationSendError < Minitest::Test
     cover "Julewire::Ractor::Destination#emit"
+    cover "Julewire::Ractor::Destination#enqueue"
     cover "Julewire::Ractor::Destination#record_loss"
     include DroppingRactorDestinationHelper
     include RactorRecordHelper

@@ -93,7 +93,8 @@ module Julewire
       assert_respond_to Julewire, :runtime
       assert_respond_to Julewire, :flush
       assert_respond_to Julewire, :close
-      assert_true(%i[health after_fork!].all? { Julewire.respond_to?(it) })
+      assert_true(%i[health before_fork! after_fork!].all? { Julewire.respond_to?(it) })
+      assert_same Julewire::Core::UnsafeForkError, Julewire::UnsafeForkError
       refute_respond_to Julewire, :reopen
       refute_respond_to Julewire, :install_at_exit_close
       refute_respond_to Julewire::Core, :loader

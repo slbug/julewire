@@ -3,12 +3,6 @@
 module Julewire
   module Karafka
     module MonitorSubscription
-      PROFILE_CONSTANTS = {
-        consumer: :CONSUMER_PROFILE,
-        producer: :PRODUCER_PROFILE
-      }.freeze
-      private_constant :PROFILE_CONSTANTS
-
       class << self
         def subscribe(monitor, event_name, component:, &)
           return false unless monitor.respond_to?(:subscribe)
@@ -20,7 +14,6 @@ module Julewire
         end
 
         def install!(monitor, profile:, configuration:)
-          profile = monitor_listener_profile(profile)
           state = subscription_state(monitor, profile)
           listener = listener_for(state, configuration, profile)
           subscriptions = subscriptions_for(state)
@@ -40,11 +33,6 @@ module Julewire
         end
 
         private
-
-        def monitor_listener_profile(profile)
-          constant_name = PROFILE_CONSTANTS.fetch(profile)
-          MonitorListener.const_get(constant_name)
-        end
 
         def listener_for(state, configuration, profile)
           listener = state&.fetch(:listener)
@@ -83,16 +71,17 @@ module Julewire
 
         def event_names(monitor, configuration, profile)
           configured = configuration.public_send(profile.config_method)
-          return profile.important_events if configured == :important
+          selected_events =
+            if configured == :important
+              profile.important_events
+            elsif all_events?(configured)
+              available_events = available_events_for(monitor)
+              available_events.empty? ? profile.important_events : available_events
+            else
+              Array(configured)
+            end
 
-          if all_events?(configured)
-            available_events = available_events_for(monitor)
-            return available_events unless available_events.empty?
-
-            return profile.important_events
-          end
-
-          Array(configured)
+          selected_events - profile.reserved_events
         end
 
         def available_events_for(monitor)

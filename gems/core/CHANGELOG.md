@@ -1,5 +1,10 @@
 ## Unreleased
 
+## 1.1.3 - 2026-08-09
+
+- Add fail-loud pre-fork hooks with shared timeout budgets and reverse rollback.
+- Refresh development tooling and compatibility locksets.
+
 ## 1.1.2 - 2026-08-02
 
 - Refresh development and compatibility dependency locksets.

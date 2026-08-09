@@ -4,11 +4,13 @@ module Julewire
   module Karafka
     module ForkHooks
       EVENTS = %w[
+        swarm.manager.before_fork
         swarm.node.after_fork
         swarm.manager.after_fork
       ].freeze
+      BEFORE_FORK_EVENT = "swarm.manager.before_fork"
       INSTALL_STATE = Core::Integration::IvarState.new(:@julewire_karafka_fork_hooks_state)
-      private_constant :EVENTS, :INSTALL_STATE
+      private_constant :BEFORE_FORK_EVENT, :EVENTS, :INSTALL_STATE
 
       class << self
         def subscribe!(monitor, configuration:)
@@ -26,8 +28,12 @@ module Julewire
         end
 
         def handle(event_name, _event)
-          IntegrationHealth.with_failure_health(action: :after_fork, component: :fork_hooks, event: event_name) do
-            Julewire.after_fork!
+          if event_name == BEFORE_FORK_EVENT
+            Julewire.before_fork!
+          else
+            IntegrationHealth.with_failure_health(action: :after_fork, component: :fork_hooks, event: event_name) do
+              Julewire.after_fork!
+            end
           end
         end
 

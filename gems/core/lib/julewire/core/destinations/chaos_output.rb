@@ -48,6 +48,13 @@ module Julewire
           self
         end
 
+        def before_fork!(timeout: nil)
+          return self unless @output.respond_to?(:before_fork!)
+          return false if @output.before_fork!(timeout: timeout) == false
+
+          self
+        end
+
         def resource_identity = @output
 
         private

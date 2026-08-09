@@ -1,5 +1,14 @@
 ## Unreleased
 
+## 1.1.3 - 2026-08-09
+
+- Quiesce destination workers before process forks and reject forks with live
+  Ractors instead of rebuilding unsafe inherited VM state.
+- Serialize emit, close, and fork transitions; preserve terminal closure and
+  keep interrupted worker teardown retryable.
+- Require julewire-core 1.1.3.
+- Refresh development tooling and compatibility locksets.
+
 ## 1.1.2 - 2026-08-02
 
 - Refresh development and compatibility dependency locksets.

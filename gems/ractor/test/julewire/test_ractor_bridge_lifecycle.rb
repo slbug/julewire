@@ -546,6 +546,7 @@ module Julewire
   class TestRactorBridgeLifecycle < Minitest::Test
     cover "Julewire::Ractor.health"
     cover "Julewire::Ractor::Bridge.after_fork!"
+    cover "Julewire::Ractor::Bridge.before_fork!"
     cover "Julewire::Ractor::Bridge.dispatch"
     cover "Julewire::Ractor::Bridge.handle_message"
     cover "Julewire::Ractor::Bridge.monitor_ractor"
@@ -768,6 +769,56 @@ module Julewire
 
       assert_equal 0, stats.health.fetch(:active_threads)
       assert_equal 0, stats.health.fetch(:started_threads)
+    end
+
+    def test_ractor_bridge_before_fork_rejects_an_active_bridge
+      stats = Julewire::Ractor::Bridge::Stats
+      stats.bridge_started
+
+      error = assert_raises(Julewire::Core::UnsafeForkError) do
+        Julewire::Ractor::Bridge.before_fork!
+      end
+
+      assert_equal "cannot fork while 1 Julewire ractor bridge thread(s) are active", error.message
+    ensure
+      stats&.bridge_stopped
+    end
+
+    def test_ractor_bridge_before_fork_rejects_an_application_ractor
+      ractor = ::Ractor.new { sleep 0.1 }
+
+      error = assert_raises(Julewire::Core::UnsafeForkError) do
+        Julewire::Ractor::Bridge.before_fork!
+      end
+
+      assert_equal "cannot fork while non-main Ractors are active", error.message
+    ensure
+      ractor&.value
+    end
+
+    def test_ractor_bridge_before_fork_accepts_the_main_ractor_alone
+      assert_nil Julewire::Ractor::Bridge.before_fork!
+    end
+
+    def test_rejected_public_before_fork_resumes_a_quiesced_destination
+      port = ::Ractor::Port.new
+      destination = Julewire::Ractor::Destination.new(output: RactorPortOutput.new(port))
+      Julewire.configure { it.destinations.add(destination) }
+      application_ractor = ::Ractor.new { sleep 0.1 }
+
+      assert_raises(Julewire::Core::UnsafeForkError) { Julewire.before_fork! }
+      application_ractor.value
+
+      Julewire.emit(message: "resumed")
+
+      assert_true Julewire.flush(timeout: 1)
+      messages = Array.new(3) { receive_ractor(port) }
+
+      assert_equal "resumed", JSON.parse(messages.find { it.is_a?(String) }).fetch("message")
+    ensure
+      application_ractor&.value
+      cleanup_ractor_destination(destination)
+      Julewire::Ractor::PortLifecycle.close(port) if port
     end
 
     def test_remote_runtime_request_returns_nil_after_bridge_port_closes

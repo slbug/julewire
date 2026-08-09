@@ -9,6 +9,7 @@ module Julewire
           @destinations = destinations.dup.freeze
           @on_drop = on_drop
           @on_failure = on_failure
+          @prepared_destinations = []
         end
 
         class << self
@@ -41,6 +42,21 @@ module Julewire
           @destinations.each do |destination|
             call_destination_after_fork(destination)
           end
+          @prepared_destinations = []
+          self
+        end
+
+        def before_fork!(timeout:)
+          Validation.validate_timeout!(timeout, name: :timeout)
+          return self unless @prepared_destinations.empty?
+
+          prepare_destinations_before_fork(timeout)
+          self
+        end
+
+        def cancel_before_fork!
+          @prepared_destinations.reverse_each { call_destination_after_fork(it) }
+          @prepared_destinations = []
           self
         end
 
@@ -63,6 +79,23 @@ module Julewire
         end
 
         private
+
+        def prepare_destinations_before_fork(timeout)
+          deadline = Scheduling::Deadline.for(timeout)
+          prepared = []
+          @destinations.each do |destination|
+            next unless destination.respond_to?(:before_fork!)
+
+            remaining = Scheduling::Deadline.remaining(deadline)
+            prepared << destination
+            result = destination.before_fork!(timeout: remaining)
+            raise Error, "destination #{destination_name(destination)} rejected before_fork" if result == false
+          end
+          @prepared_destinations = prepared
+        rescue StandardError
+          prepared.reverse_each { call_destination_after_fork(it) }
+          raise
+        end
 
         def call_lifecycle(method_name, timeout:, skip_resource_identities: nil)
           Validation.validate_timeout!(timeout, name: :timeout)
@@ -101,6 +134,8 @@ module Julewire
 
         def call_destination_after_fork(destination)
           destination.after_fork! if destination.respond_to?(:after_fork!)
+        rescue UnsafeForkError
+          raise
         rescue StandardError => e
           notify_failure(
             e,

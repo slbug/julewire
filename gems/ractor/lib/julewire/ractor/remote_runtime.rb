@@ -76,6 +76,10 @@ module Julewire
         raise Core::Error, "Julewire.after_fork! is not available inside Julewire.ractor"
       end
 
+      def before_fork!(**)
+        raise Core::Error, "Julewire.before_fork! is not available inside Julewire.ractor"
+      end
+
       def health
         raise Core::Error, "Julewire.health is not available inside Julewire.ractor"
       end

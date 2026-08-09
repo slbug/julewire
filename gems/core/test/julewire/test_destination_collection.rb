@@ -5,6 +5,8 @@ require "test_helper"
 module Julewire
   class TestDestinationCollection < Minitest::Test
     cover Julewire::Core::Destinations::Collection
+    cover "Julewire::Core::Destinations::Collection#before_fork!"
+    cover "Julewire::Core::Destinations::Collection#cancel_before_fork!"
     cover "Julewire::Core::Destinations::Collection#empty?"
 
     EqualIdentity = Data.define(:name) do
@@ -16,11 +18,13 @@ module Julewire
     class TestDestination
       attr_reader :events, :name
 
-      def initialize(name:, emit_result: nil, flush_result: true, close_result: true, identity: nil, failures: {})
+      def initialize(name:, emit_result: nil, flush_result: true, close_result: true, before_fork_result: true,
+                     identity: nil, failures: {})
         @name = name
         @emit_result = emit_result
         @flush_result = flush_result
         @close_result = close_result
+        @before_fork_result = before_fork_result
         @identity = identity
         @failures = failures
         @events = []
@@ -54,6 +58,13 @@ module Julewire
         self
       end
 
+      def before_fork!(timeout: nil)
+        events << [:before_fork, timeout]
+        raise @failures.fetch(:before_fork) if @failures.key?(:before_fork)
+
+        @before_fork_result
+      end
+
       def health
         raise @failures.fetch(:health) if @failures.key?(:health)
 
@@ -65,6 +76,22 @@ module Julewire
 
     class NoAfterForkDestination < TestDestination
       undef_method :after_fork!
+    end
+
+    class NoBeforeForkDestination < TestDestination
+      undef_method :before_fork!
+    end
+
+    class OrderedForkDestination < TestDestination
+      def initialize(order:, **)
+        super(**)
+        @order = order
+      end
+
+      def after_fork!
+        @order << name
+        super
+      end
     end
 
     class FallbackDestination < TestDestination
@@ -156,6 +183,95 @@ module Julewire
 
       assert_empty destination.events
       assert_empty failures
+    end
+
+    def test_after_fork_propagates_unsafe_fork_errors
+      error = Julewire::Core::UnsafeForkError.new("unsafe")
+      destination = TestDestination.new(name: :ractor, failures: { after_fork: error })
+      collection = collection_for([destination])
+
+      raised = assert_raises(Julewire::Core::UnsafeForkError) { collection.after_fork! }
+
+      assert_same error, raised
+    end
+
+    def test_before_fork_is_idempotent_and_cancel_resumes_only_prepared_destinations
+      order = []
+      first = OrderedForkDestination.new(name: :first, order: order)
+      plain = NoBeforeForkDestination.new(name: :plain)
+      third = OrderedForkDestination.new(name: :third, order: order)
+      collection = collection_for([first, plain, third])
+
+      assert_same collection, collection.before_fork!(timeout: 0.25)
+      assert_same collection, collection.before_fork!(timeout: 0.25)
+      assert_same collection, collection.cancel_before_fork!
+
+      before_event = first.events.fetch(0)
+      third_before_event = third.events.fetch(0)
+
+      assert_equal :before_fork, before_event.fetch(0)
+      assert_operator before_event.fetch(1), :>, 0
+      assert_operator before_event.fetch(1), :<=, 0.25
+      assert_equal [:after_fork], first.events.fetch(1)
+      assert_equal :before_fork, third_before_event.fetch(0)
+      assert_operator third_before_event.fetch(1), :>, 0
+      assert_operator third_before_event.fetch(1), :<=, before_event.fetch(1)
+      assert_equal [:after_fork], third.events.fetch(1)
+      assert_equal %i[third first], order
+      assert_empty plain.events
+
+      assert_same collection, collection.before_fork!(timeout: nil)
+      assert_equal [:before_fork, nil], first.events.fetch(2)
+      assert_equal [:before_fork, nil], third.events.fetch(2)
+    end
+
+    def test_after_fork_clears_prepared_state_for_the_next_fork
+      destination = TestDestination.new(name: :first)
+      collection = collection_for([destination])
+
+      assert_same collection, collection.before_fork!(timeout: nil)
+      assert_same collection, collection.after_fork!
+      assert_same collection, collection.before_fork!(timeout: nil)
+
+      assert_equal [[:before_fork, nil], [:after_fork], [:before_fork, nil]], destination.events
+    end
+
+    def test_before_fork_failure_resumes_destinations_prepared_earlier
+      order = []
+      first = OrderedForkDestination.new(name: :first, order: order)
+      second = OrderedForkDestination.new(
+        name: :second,
+        order: order,
+        failures: { before_fork: RuntimeError.new("unsafe") }
+      )
+      collection = collection_for([first, second])
+
+      error = assert_raises(RuntimeError) { collection.before_fork!(timeout: nil) }
+
+      assert_equal "unsafe", error.message
+      assert_equal [[:before_fork, nil], [:after_fork]], first.events
+      assert_equal [[:before_fork, nil], [:after_fork]], second.events
+      assert_equal %i[second first], order
+    end
+
+    def test_before_fork_rejects_false_and_resumes_the_attempted_destination
+      destination = TestDestination.new(name: :rejecting, before_fork_result: false)
+      collection = collection_for([destination])
+
+      error = assert_raises(Julewire::Core::Error) { collection.before_fork!(timeout: nil) }
+
+      assert_equal "destination rejecting rejected before_fork", error.message
+      assert_equal [[:before_fork, nil], [:after_fork]], destination.events
+    end
+
+    def test_before_fork_validates_timeout_before_preparing_destinations
+      destination = TestDestination.new(name: :first)
+      collection = collection_for([destination])
+
+      error = assert_raises(ArgumentError) { collection.before_fork!(timeout: -1) }
+
+      assert_equal "timeout must be nil or a non-negative finite Numeric", error.message
+      assert_empty destination.events
     end
 
     def test_lifecycle_methods_accept_default_timeout_and_validate_named_timeout

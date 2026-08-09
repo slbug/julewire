@@ -44,15 +44,21 @@ module Julewire
 
       def run(command_port:, ack_port:)
         @ack_port = ack_port
+        close_owned_output = true
         loop do
           message = command_port.receive
           current_command = command(message)
           break if current_command == :close_worker
 
+          if current_command == :quiesce_worker
+            close_owned_output = false
+            break
+          end
+
           break if dispatch(message, current_command) == :close
         end
       ensure
-        close_output
+        close_output if close_owned_output
       end
 
       private

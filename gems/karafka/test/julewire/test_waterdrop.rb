@@ -147,7 +147,7 @@ module Julewire
       require "waterdrop/instrumentation/notifications"
 
       events = Julewire::Karafka::Configuration::IMPORTANT_PRODUCER_EVENT_NAMES +
-               Julewire::Karafka::EventSeverity.const_get(:DEBUG_PRODUCER_EVENTS, false)
+               Julewire::Karafka::EventSeverity::DEBUG_PRODUCER_EVENTS
       missing = events.uniq - ::WaterDrop::Instrumentation::Notifications::EVENTS
 
       assert_empty missing

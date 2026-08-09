@@ -79,6 +79,8 @@ remote request timeout is one second. `timeout: nil` remains unbounded.
 - `Julewire.labels`
 - `Julewire.health`
 - `Julewire.close`
+- `Julewire.before_fork!`
+- `Julewire.after_fork!`
 
 These belong to the parent runtime.
 
@@ -166,9 +168,26 @@ code needs Julewire facade calls to reach the parent runtime.
 
 ## Forking
 
-Do not fork a process with live Julewire ractor bridges. After a process fork,
-core calls the ractor integration after-fork hook and clears inherited bridge
-thread health. Create new ractors in the worker process after fork.
+CRuby cannot safely continue Ractor execution in a child forked while another
+Ractor is alive. Rebuilding inherited handles in the child is therefore too
+late.
+
+Stop application work, then call `Julewire.before_fork!` before the actual
+`Process.fork`. It flushes and stops Ractor destination workers without closing
+their outputs. It rejects the fork while a `Julewire.ractor` bridge or any other
+non-main Ractor remains active. Call `Julewire.after_fork!` in the child to start
+fresh destination workers, and in the parent too when it must resume logging
+between forks.
+
+```ruby
+before_fork { Julewire.before_fork! }
+on_worker_boot { Julewire.after_fork! }
+```
+
+The application must prevent concurrent emits and new Ractor creation between
+the pre-fork call and `Process.fork`; Julewire cannot make an external fork
+atomic. Calling `after_fork!` in an unprepared child raises
+`Julewire::UnsafeForkError` without touching inherited Ractor handles.
 
 ## Runtime Promise
 
