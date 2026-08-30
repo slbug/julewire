@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.4 - 2026-08-30
+
+- Refresh the dependency lockset and require julewire-core 1.1.4.
+
 ## 1.1.3 - 2026-08-09
 
 - Quiesce Julewire resources without emitting after Karafka pre-fork preparation.

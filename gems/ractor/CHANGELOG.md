@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.4 - 2026-08-30
+
+- Refresh the dependency lockset and require julewire-core 1.1.4.
+
 ## 1.1.3 - 2026-08-09
 
 - Quiesce destination workers before process forks and reject forks with live

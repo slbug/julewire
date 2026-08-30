@@ -89,7 +89,7 @@ module Julewire
     end
 
     # The ensure block owns real child-process and pipe cleanup after the platform guard.
-    # rubocop:disable Minitest/SkipEnsure
+    # rubocop:disable-next Minitest/SkipEnsure
     def test_after_fork_discards_inherited_work_in_a_real_child
       skip "Process.fork is unavailable" unless Process.respond_to?(:fork)
 
@@ -120,7 +120,6 @@ module Julewire
         Process.wait(child_pid)
       end
     end
-    # rubocop:enable Minitest/SkipEnsure
 
     private
 

@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.4 - 2026-08-30
+
+- Refresh the development dependency lockset.
+
 ## 1.1.3 - 2026-08-09
 
 - Add fail-loud pre-fork hooks with shared timeout budgets and reverse rollback.
