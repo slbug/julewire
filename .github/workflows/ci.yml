@@ -259,6 +259,48 @@ jobs:
           flags: active_job,ruby-${{ matrix.ruby }}
           fail_ci_if_error: true
 
+  active-job-solid-queue:
+    needs: changes
+    if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.active_job == 'true' || needs.changes.outputs.rails_support == 'true' }}
+    runs-on: ubuntu-latest
+    name: active_job / Solid Queue / Ruby ${{ matrix.ruby }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.4'
+          - '4.0'
+    env:
+      BUNDLE_GEMFILE: ${{ github.workspace }}/gems/active_job/gemfiles/solid_queue.gemfile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: gems/active_job
+
+      - name: Run Solid Queue batch integration tests
+        working-directory: gems/active_job
+        env:
+          JULEWIRE_JUNIT: "1"
+          JULEWIRE_JUNIT_DIR: integration/test/reports
+        run: bundle exec rake integration:solid_queue
+
+      - name: Upload integration test results
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          use_oidc: true
+          report_type: test_results
+          files: ./gems/active_job/integration/test/reports/TEST-minitest.xml
+          disable_search: true
+          flags: active_job_solid_queue,ruby-${{ matrix.ruby }}
+          fail_ci_if_error: true
+
   gcp:
     needs: changes
     if: ${{ needs.changes.outputs.shared == 'true' || needs.changes.outputs.core == 'true' || needs.changes.outputs.gcp == 'true' }}
@@ -730,6 +772,7 @@ jobs:
       - repository-policy
       - core
       - active_job
+      - active-job-solid-queue
       - gcp
       - karafka
       - rails

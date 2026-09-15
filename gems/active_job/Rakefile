@@ -11,7 +11,7 @@ end
 require "rubocop/rake_task"
 
 RuboCop::RakeTask.new do |task|
-  task.patterns = %w[*.gemspec Gemfile Rakefile exe/* lib/**/*.rb test/**/*.rb]
+  task.patterns = %w[*.gemspec Gemfile gemfiles/*.gemfile Rakefile exe/* lib/**/*.rb test/**/*.rb integration/**/*.rb]
 end
 
 def ruby_exec(gem_name, executable, arguments)
@@ -26,7 +26,7 @@ end
 
 desc "Run Flay duplicate code analysis"
 task :flay do
-  ruby_exec("flay", "flay", %w[lib test])
+  ruby_exec("flay", "flay", %w[lib test integration])
 end
 
 desc "Run Debride unused code analysis"
@@ -37,6 +37,16 @@ end
 desc "Run Bundler audit"
 task :audit do
   ruby_exec("bundler-audit", "bundle-audit", %w[check --update])
+end
+
+namespace :integration do
+  desc "Run real Solid Queue batch compatibility tests (requires gemfiles/solid_queue.gemfile bundle)"
+  task :solid_queue do
+    Bundler.with_unbundled_env do
+      sh({ "BUNDLE_GEMFILE" => File.expand_path("gemfiles/solid_queue.gemfile", __dir__) },
+         RbConfig.ruby, "-rbundler/setup", "-Ilib", "integration/test/test_solid_queue.rb")
+    end
+  end
 end
 
 task default: %i[test rubocop flay debride audit]

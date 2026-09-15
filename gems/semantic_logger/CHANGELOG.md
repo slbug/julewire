@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.5 - 2026-09-15
+
+- Refresh compatibility locksets and require julewire-core 1.1.5.
+
 ## 1.1.4 - 2026-08-30
 
 - Refresh compatibility locksets and require julewire-core 1.1.4.

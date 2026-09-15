@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.5 - 2026-09-15
+
+- Refresh the development dependency lockset.
+
 ## 1.1.4 - 2026-08-30
 
 - Refresh the development dependency lockset.

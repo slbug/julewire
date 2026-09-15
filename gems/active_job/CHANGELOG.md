@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 1.1.5 - 2026-09-15
+
+- Keep a deserialized job's original context through retries and reserialization,
+  including Solid Queue 1.7 batch callbacks.
+- Refresh dependency locksets and require Julewire 1.1.5 dependencies.
+
 ## 1.1.4 - 2026-08-30
 
 - Refresh the dependency lockset and require Julewire 1.1.4 dependencies.
