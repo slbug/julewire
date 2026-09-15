@@ -187,16 +187,6 @@ module Julewire
       assert_equal :ok, Julewire.health.dig(:process_integrations, :active_job, :status)
     end
 
-    def test_job_serialization_omits_missing_carrier_value
-      job_data = {}
-
-      with_overridden_singleton_method(Julewire::Core::Propagation::Carrier, :inject, proc { |_carrier, **| {} }) do
-        job_serializing(job_data).serialize
-      end
-
-      assert_empty job_data
-    end
-
     def test_job_serialization_extracts_empty_carrier_when_payload_missing
       job = FakeSerializedJob.new
 

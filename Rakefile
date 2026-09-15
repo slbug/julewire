@@ -271,6 +271,7 @@ CORE_BRIDGE_ALLOWED_PREFIXES = %w[
   Core::Serialization::Serializer
 ].freeze
 CUSTOM_GEMFILES = {
+  "gems/active_job" => %w[gemfiles/solid_queue.gemfile],
   "gems/rails" => %w[
     gemfiles/rails_8_1.gemfile
     gemfiles/rails_head.gemfile

@@ -7,6 +7,9 @@ gemspec
 gem "julewire-core", path: "../core"
 gem "julewire-rails_support", path: "../rails_support"
 
+# TODO: Remove when a Rails patch fixes JSON 3 keyword options in ActiveSupport::JSON.decode.
+gem "json", "< 3"
+
 gem "irb"
 gem "rake", ">= 13.4"
 

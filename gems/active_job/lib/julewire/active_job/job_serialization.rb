@@ -22,14 +22,25 @@ module Julewire
         configuration = julewire_active_job_configuration
         return unless configuration.propagation?
 
-        carrier = Core::Propagation::Carrier.inject(key: configuration.carrier_key,
-                                                    max_bytes: configuration.carrier_max_bytes)
-        return unless carrier
+        value = serialized_carrier_value(configuration)
+        return unless value
 
-        job_data[configuration.serialized_carrier_key] = carrier.fetch(configuration.carrier_key.to_s)
+        job_data[configuration.serialized_carrier_key] = value
         IntegrationHealth.record_success
       rescue StandardError => e
         IntegrationHealth.record_failure(e, action: :carrier_inject, component: :job_serialization)
+      end
+
+      def serialized_carrier_value(configuration)
+        # A deserialized job retains its enqueue origin, not the reserializer's context.
+        carrier = instance_variable_get(CARRIER_IVAR)
+        return Core::Propagation::Carrier.encode(max_bytes: configuration.carrier_max_bytes) unless carrier
+
+        value = carrier[configuration.carrier_key]
+        return unless value
+        return value unless configuration.carrier_max_bytes
+
+        value if value.bytesize <= configuration.carrier_max_bytes
       end
 
       def extract_julewire_carrier(job_data)
@@ -40,6 +51,7 @@ module Julewire
         end
 
         value = job_data[configuration.serialized_carrier_key]
+        value = value.to_s if value
         instance_variable_set(CARRIER_IVAR, value ? { configuration.carrier_key => value } : {})
         IntegrationHealth.record_success
       rescue StandardError => e

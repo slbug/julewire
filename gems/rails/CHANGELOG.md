@@ -1,5 +1,9 @@
 ## Unreleased
 
+## 1.1.5 - 2026-09-15
+
+- Refresh dependency locksets and require Julewire 1.1.5 dependencies.
+
 ## 1.1.4 - 2026-08-30
 
 - Refresh dependency locksets and require Julewire 1.1.4 dependencies.

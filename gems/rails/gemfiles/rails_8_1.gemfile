@@ -2,6 +2,9 @@
 
 source "https://rubygems.org", cooldown: 3
 
+# TODO: Remove when a Rails patch fixes JSON 3 keyword options in ActiveSupport::JSON.decode.
+gem "json", "< 3"
+
 gem "bundler-audit", ">= 0.9"
 gem "debride", ">= 1.15"
 gem "flay", ">= 2.14"

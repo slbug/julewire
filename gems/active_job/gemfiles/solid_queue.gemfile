@@ -1,0 +1,6 @@
+# frozen_string_literal: true
+
+eval_gemfile "../Gemfile"
+
+gem "solid_queue", ">= 1.7", require: false
+gem "sqlite3", ">= 2.1"
