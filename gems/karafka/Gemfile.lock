@@ -63,37 +63,37 @@ GEM
     karafka-core (2.6.4)
       karafka-rdkafka (>= 0.20.0)
       logger (>= 1.6.0)
-    karafka-rdkafka (0.28.1)
+    karafka-rdkafka (0.29.0)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    karafka-rdkafka (0.28.1-aarch64-linux-gnu)
+    karafka-rdkafka (0.29.0-aarch64-linux-gnu)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    karafka-rdkafka (0.28.1-aarch64-linux-musl)
+    karafka-rdkafka (0.29.0-aarch64-linux-musl)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    karafka-rdkafka (0.28.1-arm64-darwin)
+    karafka-rdkafka (0.29.0-arm64-darwin)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    karafka-rdkafka (0.28.1-x86_64-linux-gnu)
+    karafka-rdkafka (0.29.0-x86_64-linux-gnu)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
       mini_portile2 (~> 2.6)
       rake (> 12)
-    karafka-rdkafka (0.28.1-x86_64-linux-musl)
+    karafka-rdkafka (0.29.0-x86_64-linux-musl)
       ffi (~> 1.17.1)
       json (> 2.0)
       logger
@@ -201,7 +201,7 @@ GEM
       diff-lcs (>= 1.6, < 3)
       parser (>= 3.3.0)
       prism (>= 1.5.1)
-    waterdrop (2.10.4)
+    waterdrop (2.10.5)
       karafka-core (>= 2.5.12, < 3.0.0)
       karafka-rdkafka (>= 0.24.0)
       zeitwerk (~> 2.3)
@@ -275,12 +275,12 @@ CHECKSUMS
   julewire-karafka (1.1.5)
   karafka (2.6.1) sha256=a442ae87e5c3db5d38583151a51c8afcff27ce2d0bcb72b150ef15cdb0df91cb
   karafka-core (2.6.4) sha256=e08166ca7ef12fadf0500f2a3aba63b5ba918a98533c3feaac9f43c90f159363
-  karafka-rdkafka (0.28.1) sha256=6714a5382b76a4a8036a048416bc4c55d617e6000574b5de063656d1212ce6a0
-  karafka-rdkafka (0.28.1-aarch64-linux-gnu) sha256=ec6656ef82e4ca4f93628b360bd20814a08ee00ed62e3d3bafa7e890e77aca39
-  karafka-rdkafka (0.28.1-aarch64-linux-musl) sha256=62262053ecf09576d6fbe6908ce90056b318ea0492ec941d8c0e6de4974a1682
-  karafka-rdkafka (0.28.1-arm64-darwin) sha256=0b672f7d0b1cc05d7f9752f1d4579dc8216ee6010a7d7367177a57716d1f9091
-  karafka-rdkafka (0.28.1-x86_64-linux-gnu) sha256=f9b4cf8a6fbc112031454bb738ebbc016713a8dd546f10881b63e180d9bef654
-  karafka-rdkafka (0.28.1-x86_64-linux-musl) sha256=a397bb5a680595174bdf46fa728f5f36975b943921a6a6caf85e5ffc33841f35
+  karafka-rdkafka (0.29.0) sha256=f2d39bbcc0f2bcd63dd0deea08ac4bb6ad31a714b7518c76493e724af0f0f2a2
+  karafka-rdkafka (0.29.0-aarch64-linux-gnu) sha256=4d7e7e8eb81a221c35d36d28bd6b02c666a901e064e11ca96f45800cd4575f29
+  karafka-rdkafka (0.29.0-aarch64-linux-musl) sha256=4dda233893d8157103fefb5697bd4cc86fec934ab678fa06090e68c1a49b7709
+  karafka-rdkafka (0.29.0-arm64-darwin) sha256=d421ae4b7c5947cc78ac5c4fcb6b99f5045989b39f17d5cb2320c686cf8a0080
+  karafka-rdkafka (0.29.0-x86_64-linux-gnu) sha256=fbeb0ba7ed32bdce1ee18fb262b18b425594cb13a004eaf4e39e6a811e3eaac4
+  karafka-rdkafka (0.29.0-x86_64-linux-musl) sha256=5dcebdc8127bda180b4dc8224c96b189eae10c4c9ce05a5ac5f814900400ec07
   karafka-testing (2.6.2) sha256=d6872f793a0d8465d5aea76303be5c2d5c8b75ebf3c6985fe1c32c03259190d4
   language_server-protocol (3.17.0.6) sha256=5ef2c0c138f8267e1bc631d3328347d354f96724b0af22f2c79516120443b7f0
   lint_roller (1.1.0) sha256=2c0c845b632a7d172cb849cc90c1bce937a28c5c8ccccb50dfd46a485003cc87
@@ -328,7 +328,7 @@ CHECKSUMS
   unicode-display_width (3.2.0) sha256=0cdd96b5681a5949cdbc2c55e7b420facae74c4aaf9a9815eee1087cb1853c42
   unicode-emoji (4.2.0) sha256=519e69150f75652e40bf736106cfbc8f0f73aa3fb6a65afe62fefa7f80b0f80f
   unparser (0.9.0) sha256=4331f174a73a23b69250b13d47da3794ed1449711ee0f9ed8947dc020ba76067
-  waterdrop (2.10.4) sha256=aac28f7d88f99acb8eafe3333d6d672106194a8b29eecaa7f2db99326ed75adb
+  waterdrop (2.10.5) sha256=3240f3f8270bfeecb4178b36fed41e269598bf3205523f4b399ce11afe0bc2a8
   zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
 
 BUNDLED WITH
