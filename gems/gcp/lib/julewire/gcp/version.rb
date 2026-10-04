@@ -2,6 +2,6 @@
 
 module Julewire
   module GCP
-    VERSION = "1.1.5"
+    VERSION = "1.1.6"
   end
 end

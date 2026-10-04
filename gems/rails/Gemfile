@@ -10,9 +10,6 @@ gem "julewire-rails_support", path: "../rails_support"
 gem "rails", ">= 8.1", "< 9.0"
 gem "sqlite3", ">= 2.9"
 
-# TODO: Remove when a Rails patch fixes JSON 3 keyword options in ActiveSupport::JSON.decode.
-gem "json", "< 3"
-
 gem "irb"
 gem "rake", ">= 13.4"
 
